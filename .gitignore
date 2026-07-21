@@ -1,0 +1,10 @@
+.dotnet/
+.dotnet-install.ps1
+.dotnet-sdk-*.zip
+.dotnet-home/
+.nuget/
+bin/
+obj/
+.vs/
+*.user
+
