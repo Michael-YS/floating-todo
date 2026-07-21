@@ -51,7 +51,7 @@ internal static class NativeWindow
         window.Activate();
     }
 
-    public static void ResetToPrimaryTopRight(System.Windows.Window window, double margin = 18)
+    public static void ResetToPrimaryTopRight(System.Windows.Window window, double margin = 6)
     {
         var screen = Forms.Screen.PrimaryScreen;
         if (screen is null)
@@ -62,7 +62,7 @@ internal static class NativeWindow
         PositionInWorkingArea(window, screen.WorkingArea, margin);
     }
 
-    public static void KeepInsideCurrentWorkingArea(System.Windows.Window window, double margin = 18)
+    public static void KeepInsideCurrentWorkingArea(System.Windows.Window window, double margin = 6)
     {
         var handle = new WindowInteropHelper(window).Handle;
         var screen = Forms.Screen.FromHandle(handle);

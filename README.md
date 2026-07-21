@@ -2,7 +2,7 @@
 
 Floating Todo 是一个仅面向 Windows 11 的轻量 CalDAV VTODO 桌面 HUD。它常驻桌面层，普通应用会覆盖它；点击托盘图标可临时置顶 15 秒。
 
-## v0.1.0 功能
+## v0.1.1 功能
 
 - 合并显示多个 CalDAV 账户和任务清单，以任务左侧色条区分清单。
 - 按逾期、今天、明天和后续日期分组；内容少时自动缩短，最多占满当前屏幕工作区且不遮挡任务栏。
@@ -41,5 +41,5 @@ $env:DOTNET_CLI_HOME = "$PWD\.dotnet-home"
 ## 已知边界
 
 - 仅支持 HTTPS CalDAV 和 Basic Authentication，已按 Radicale 的标准 CalDAV 端点设计。
-- v0.1.0 仅提供 Windows x64 便携 ZIP，不含安装器、自动更新或开机启动。
-- 提醒功能不在 v0.1.0 中。
+- v0.1.1 仅提供 Windows x64 便携 ZIP，不含安装器、自动更新或开机启动。
+- 提醒功能不在 v0.1.1 中。
