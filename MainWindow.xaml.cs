@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Net.NetworkInformation;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -10,6 +12,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using Microsoft.Win32;
 using Forms = System.Windows.Forms;
 using Color = System.Windows.Media.Color;
 using DrawingSystemIcons = System.Drawing.SystemIcons;
@@ -18,9 +21,15 @@ namespace FloatingTodo;
 
 public partial class MainWindow : Window
 {
-    private readonly TaskStore _store = new();
+    private readonly AppDatabase _database;
+    private readonly CredentialVault _vault;
+    private readonly CalDavClient _calDavClient;
+    private readonly ICalendarCodec _codec;
+    private readonly TaskStore _store;
+    private readonly CalDavSyncEngine _syncEngine;
     private readonly DispatcherTimer _temporaryTimer;
     private readonly DispatcherTimer _completionTimer;
+    private readonly DispatcherTimer _scheduledSyncTimer;
     private readonly Forms.NotifyIcon _trayIcon;
     private readonly Dictionary<Guid, TextBlock> _completionCountdowns = new();
     private DateTimeOffset? _temporaryUntil;
@@ -30,15 +39,28 @@ public partial class MainWindow : Window
     private bool _allowExit;
     private int _newListIndex;
     private DateTime? _newDue = DateTime.Today;
+    private DateTimeOffset _lastSyncAttempt = DateTimeOffset.MinValue;
 
     public MainWindow()
     {
         InitializeComponent();
 
+        _database = new AppDatabase();
+        _vault = new CredentialVault();
+        _calDavClient = new CalDavClient();
+        _codec = new ICalendarCodec();
+        _store = new TaskStore(_database, _codec);
+        _syncEngine = new CalDavSyncEngine(_database, _vault, _calDavClient, _codec);
+        _syncEngine.StatusChanged += SyncEngine_StatusChanged;
+        _syncEngine.DataChanged += SyncEngine_DataChanged;
+
         _temporaryTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _temporaryTimer.Tick += TemporaryTimer_Tick;
         _completionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _completionTimer.Tick += CompletionTimer_Tick;
+        _scheduledSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
+        _scheduledSyncTimer.Tick += ScheduledSyncTimer_Tick;
+        _scheduledSyncTimer.Start();
 
         _trayIcon = new Forms.NotifyIcon
         {
@@ -48,6 +70,8 @@ public partial class MainWindow : Window
             ContextMenuStrip = BuildTrayMenu()
         };
         _trayIcon.MouseClick += TrayIcon_MouseClick;
+        NetworkChange.NetworkAvailabilityChanged += NetworkAvailabilityChanged;
+        SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
 
         Loaded += MainWindow_Loaded;
         LocationChanged += (_, _) => NativeWindow.KeepInsideCurrentWorkingArea(this);
@@ -55,12 +79,16 @@ public partial class MainWindow : Window
         RefreshTasks();
     }
 
-    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         NativeWindow.Configure(this);
         UpdateWorkingArea();
         NativeWindow.ResetToPrimaryTopRight(this);
         NativeWindow.SendToDesktop(this);
+        if (_database.GetAccounts().Any(account => account.Enabled))
+        {
+            await SynchronizeAsync(SyncTrigger.Startup);
+        }
     }
 
     private Forms.ContextMenuStrip BuildTrayMenu()
@@ -72,14 +100,14 @@ public partial class MainWindow : Window
             ShowTemporarily();
             OpenNewTask();
         }));
-        menu.Items.Add("立即同步", null, (_, _) => Dispatcher.Invoke(() =>
+        menu.Items.Add("立即同步", null, (_, _) => Dispatcher.Invoke(async () =>
         {
-            SyncText.Text = "刚刚同步";
             ShowTemporarily();
+            await SynchronizeAsync(SyncTrigger.TrayRequest);
         }));
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("设置", null, (_, _) => Dispatcher.Invoke(() =>
-            System.Windows.MessageBox.Show("设置页将在 CalDAV 接入阶段实现。", "Floating Todo")));
+        menu.Items.Add("设置", null, (_, _) => Dispatcher.Invoke(OpenSettings));
+        menu.Items.Add("解决同步冲突", null, (_, _) => Dispatcher.Invoke(OpenConflicts));
         menu.Items.Add("重置 HUD 位置", null, (_, _) => Dispatcher.Invoke(() =>
         {
             NativeWindow.ResetToPrimaryTopRight(this);
@@ -163,6 +191,11 @@ public partial class MainWindow : Window
 
     private void OpenNewTask()
     {
+        if (_store.Lists.Count == 0)
+        {
+            OpenSettings();
+            return;
+        }
         NewTaskPanel.Visibility = Visibility.Visible;
         NewTitleBox.Focus();
         _interactionOpen = true;
@@ -271,6 +304,7 @@ public partial class MainWindow : Window
         NewTitleBox.Clear();
         CloseNewTask();
         RefreshTasks();
+        _ = SynchronizeAsync(SyncTrigger.LocalChange);
     }
 
     private void CloseNewTask()
@@ -366,6 +400,7 @@ public partial class MainWindow : Window
         {
             _store.ToggleCompleted(item);
             RefreshTasks();
+            _ = SynchronizeAsync(SyncTrigger.LocalChange);
         };
         Grid.SetColumn(complete, 1);
 
@@ -443,12 +478,14 @@ public partial class MainWindow : Window
             _store.Upsert(draft);
             SyncText.Text = "等待同步";
             RefreshTasks();
+            _ = SynchronizeAsync(SyncTrigger.LocalChange);
         };
         editor.TaskDeleted += id =>
         {
             _store.Delete(id);
             SyncText.Text = "等待同步";
             RefreshTasks();
+            _ = SynchronizeAsync(SyncTrigger.LocalChange);
         };
         editor.ShowDialog();
 
@@ -552,6 +589,8 @@ public partial class MainWindow : Window
 
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
+        NetworkChange.NetworkAvailabilityChanged -= NetworkAvailabilityChanged;
+        SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
     }
 
     private void ExitApplication()
@@ -559,6 +598,141 @@ public partial class MainWindow : Window
         _allowExit = true;
         Close();
         System.Windows.Application.Current.Shutdown();
+    }
+
+    private async void ScheduledSyncTimer_Tick(object? sender, EventArgs e)
+    {
+        if (!_database.GetAccounts().Any(account => account.Enabled))
+        {
+            return;
+        }
+
+        var pluggedIn = Forms.SystemInformation.PowerStatus.PowerLineStatus == Forms.PowerLineStatus.Online;
+        var interval = pluggedIn ? TimeSpan.FromMinutes(1) : TimeSpan.FromMinutes(5);
+        if (DateTimeOffset.Now - _lastSyncAttempt >= interval)
+        {
+            await SynchronizeAsync(SyncTrigger.Scheduled);
+        }
+    }
+
+    private async Task SynchronizeAsync(SyncTrigger trigger)
+    {
+        if (!_database.GetAccounts().Any(account => account.Enabled))
+        {
+            return;
+        }
+
+        _lastSyncAttempt = DateTimeOffset.Now;
+        try
+        {
+            await _syncEngine.SynchronizeAsync(trigger);
+        }
+        catch
+        {
+            // StatusChanged already exposes the actionable error in the HUD.
+        }
+    }
+
+    private void NetworkAvailabilityChanged(object? sender, NetworkAvailabilityEventArgs e)
+    {
+        if (e.IsAvailable)
+        {
+            Dispatcher.InvokeAsync(() => SynchronizeAsync(SyncTrigger.NetworkRestored));
+        }
+    }
+
+    private void SystemEvents_PowerModeChanged(object sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == PowerModes.Resume)
+        {
+            Dispatcher.InvokeAsync(() => SynchronizeAsync(SyncTrigger.Resume));
+        }
+    }
+
+    private void SyncEngine_StatusChanged(SyncStatus status)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            SyncText.Text = status.State switch
+            {
+                SyncState.Synchronizing => "同步中",
+                SyncState.WaitingToUpload => "等待同步",
+                SyncState.Conflict => "有冲突",
+                SyncState.Error => "同步错误",
+                SyncState.Offline => "离线",
+                _ => "刚刚同步"
+            };
+            SyncText.ToolTip = status.Message;
+        });
+    }
+
+    private void SyncEngine_DataChanged()
+    {
+        Dispatcher.Invoke(() =>
+        {
+            _store.Reload();
+            _newListIndex = Math.Clamp(_newListIndex, 0, Math.Max(0, _store.Lists.Count - 1));
+            if (_store.Lists.Count > 0)
+            {
+                UpdateNewListButton();
+            }
+            RefreshTasks();
+        });
+    }
+
+    private void OpenSettings()
+    {
+        _interactionOpen = true;
+        var settings = new SettingsWindow(_database, _vault, _calDavClient, _store)
+        {
+            Owner = this,
+            Topmost = _isTemporary
+        };
+        settings.ConfigurationChanged += () =>
+        {
+            _store.Reload();
+            _newListIndex = 0;
+            if (_store.Lists.Count > 0)
+            {
+                UpdateNewListButton();
+            }
+            RefreshTasks();
+            _ = SynchronizeAsync(SyncTrigger.LocalChange);
+        };
+        settings.ShowDialog();
+        _interactionOpen = false;
+        if (_isTemporary)
+        {
+            ResetTemporaryCountdown();
+        }
+    }
+
+    private void OpenConflicts()
+    {
+        if (_database.GetConflicts().Count == 0)
+        {
+            System.Windows.MessageBox.Show("当前没有同步冲突。", "Floating Todo");
+            return;
+        }
+
+        _interactionOpen = true;
+        var window = new ConflictWindow(_database, _codec)
+        {
+            Owner = this,
+            Topmost = _isTemporary
+        };
+        window.ConflictResolved += () =>
+        {
+            _store.Reload();
+            RefreshTasks();
+            _ = SynchronizeAsync(SyncTrigger.LocalChange);
+        };
+        window.ShowDialog();
+        _interactionOpen = false;
+        if (_isTemporary)
+        {
+            ResetTemporaryCountdown();
+        }
     }
 
     private static DateTime NextSaturday(DateTime from)

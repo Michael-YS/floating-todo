@@ -3,13 +3,16 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Controls;
 
 namespace FloatingTodo;
 
 public partial class EditorWindow : Window
 {
+    private const string CustomRecurrence = "__CUSTOM__";
     private readonly TodoItem _original;
     private readonly TodoItem _draft;
+    private readonly ComboBox _recurrencePresetBox;
     private bool _discarded;
     private bool _deleted;
     private bool _deleteArmed;
@@ -17,6 +20,18 @@ public partial class EditorWindow : Window
     public EditorWindow(TodoItem item, IReadOnlyList<TodoListInfo> lists)
     {
         InitializeComponent();
+        _recurrencePresetBox = new ComboBox
+        {
+            Height = 38,
+            Margin = new Thickness(0, 0, 0, 8),
+            DisplayMemberPath = nameof(RecurrenceChoice.Label),
+            SelectedValuePath = nameof(RecurrenceChoice.Rule),
+            ItemsSource = RecurrenceChoices
+        };
+        ((StackPanel)RecurrenceBox.Parent).Children.Insert(
+            ((StackPanel)RecurrenceBox.Parent).Children.IndexOf(RecurrenceBox),
+            _recurrencePresetBox);
+        _recurrencePresetBox.SelectionChanged += RecurrencePresetBox_SelectionChanged;
         _original = item;
         _draft = item.Clone();
         ListBox.ItemsSource = lists;
@@ -39,6 +54,9 @@ public partial class EditorWindow : Window
         PriorityBox.SelectedValue = _draft.Priority;
         DescriptionBox.Text = _draft.Description;
         RecurrenceBox.Text = _draft.RecurrenceRule;
+        _recurrencePresetBox.SelectedValue = RecurrenceChoices.Exists(choice => choice.Rule == _draft.RecurrenceRule)
+            ? _draft.RecurrenceRule
+            : CustomRecurrence;
     }
 
     public event Action<TodoItem>? TaskSaved;
@@ -72,6 +90,14 @@ public partial class EditorWindow : Window
         if (e.ButtonState == MouseButtonState.Pressed)
         {
             DragMove();
+        }
+    }
+
+    private void RecurrencePresetBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_recurrencePresetBox.SelectedValue is string rule && rule != CustomRecurrence)
+        {
+            RecurrenceBox.Text = rule;
         }
     }
 
@@ -126,6 +152,15 @@ public partial class EditorWindow : Window
         _draft.Priority = PriorityBox.SelectedValue is TodoPriority priority ? priority : TodoPriority.None;
         _draft.Description = DescriptionBox.Text;
         _draft.RecurrenceRule = RecurrenceBox.Text.Trim();
+        try
+        {
+            new ICalendarCodec().ValidateRecurrence(_draft.RecurrenceRule);
+        }
+        catch (Exception)
+        {
+            error = "重复规则格式无效";
+            return false;
+        }
         return true;
     }
 
@@ -158,4 +193,16 @@ public partial class EditorWindow : Window
     }
 
     private sealed record PriorityChoice(string Label, TodoPriority Value);
+    private sealed record RecurrenceChoice(string Label, string Rule);
+
+    private static readonly List<RecurrenceChoice> RecurrenceChoices =
+    [
+        new("不重复", string.Empty),
+        new("每天", "FREQ=DAILY"),
+        new("每个工作日", "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"),
+        new("每周", "FREQ=WEEKLY"),
+        new("每月", "FREQ=MONTHLY"),
+        new("每年", "FREQ=YEARLY"),
+        new("高级自定义", CustomRecurrence)
+    ];
 }

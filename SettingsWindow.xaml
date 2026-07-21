@@ -1,0 +1,80 @@
+<Window x:Class="FloatingTodo.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Floating Todo 设置" Width="640" Height="720"
+        WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True"
+        Background="Transparent" WindowStartupLocation="CenterScreen" ShowInTaskbar="False">
+  <Border Background="#F51B191E" BorderBrush="#45FFFFFF" BorderThickness="1" CornerRadius="16" Padding="24">
+    <Grid>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+      </Grid.RowDefinitions>
+
+      <Grid Margin="0,0,0,18" MouseLeftButtonDown="Header_MouseLeftButtonDown">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <StackPanel>
+          <TextBlock Text="设置" FontSize="22" FontWeight="SemiBold" />
+          <TextBlock Text="账号、任务清单与同步" Foreground="{StaticResource SecondaryText}" FontSize="12" Margin="0,4,0,0" />
+        </StackPanel>
+        <Button Grid.Column="1" Content="✕" Style="{StaticResource IconButton}" Click="Close_Click" />
+      </Grid>
+
+      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <TextBlock Text="CalDAV 账号" FontSize="15" FontWeight="SemiBold" />
+          <StackPanel x:Name="AccountsPanel" Margin="0,10,0,18" />
+
+          <Border Background="#1FFFFFFF" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="12" Padding="16">
+            <StackPanel>
+              <TextBlock Text="添加账号" FontSize="15" FontWeight="SemiBold" />
+              <TextBlock Text="密码只写入 Windows Credential Manager" Foreground="{StaticResource SecondaryText}" FontSize="11" Margin="0,3,0,14" />
+
+              <TextBlock Text="名称" Foreground="{StaticResource SecondaryText}" Margin="0,0,0,5" />
+              <TextBox x:Name="AccountNameBox" Style="{StaticResource GlassTextBox}" Text="Radicale" />
+
+              <TextBlock Text="CalDAV HTTPS 地址" Foreground="{StaticResource SecondaryText}" Margin="0,13,0,5" />
+              <TextBox x:Name="UrlBox" Style="{StaticResource GlassTextBox}" ToolTip="例如 https://dav.example.com/username/" />
+
+              <Grid Margin="0,13,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="12" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                  <TextBlock Text="用户名" Foreground="{StaticResource SecondaryText}" Margin="0,0,0,5" />
+                  <TextBox x:Name="UsernameBox" Style="{StaticResource GlassTextBox}" />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="密码" Foreground="{StaticResource SecondaryText}" Margin="0,0,0,5" />
+                  <PasswordBox x:Name="PasswordBox" Height="38" Padding="10,7" />
+                </StackPanel>
+              </Grid>
+
+              <Grid Margin="0,15,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="ConnectionStatusText" Foreground="{StaticResource SecondaryText}"
+                           TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0" />
+                <Button Grid.Column="1" x:Name="ConnectButton" Content="连接并发现清单"
+                        Background="#6FA8FF" Foreground="White" BorderThickness="0" Padding="16,10"
+                        Click="Connect_Click" />
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <TextBlock Text="任务清单" FontSize="15" FontWeight="SemiBold" Margin="0,22,0,5" />
+          <TextBlock Text="勾选决定是否显示；点击色块切换颜色。" Foreground="{StaticResource SecondaryText}" FontSize="11" />
+          <StackPanel x:Name="CalendarsPanel" Margin="0,10,0,0" />
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+  </Border>
+</Window>
+
