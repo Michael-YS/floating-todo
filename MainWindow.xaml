@@ -4,14 +4,14 @@
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="Floating Todo" Width="360" MinHeight="170" MaxHeight="900"
         WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="False"
-        Background="#F21B191E" ShowInTaskbar="False" ShowActivated="False" SizeToContent="Height"
+        Background="#D91B191E" ShowInTaskbar="False" ShowActivated="False" SizeToContent="Height"
         MouseEnter="Window_MouseEnter" MouseLeave="Window_MouseLeave"
         Deactivated="Window_Deactivated">
   <shell:WindowChrome.WindowChrome>
     <shell:WindowChrome CaptionHeight="0" CornerRadius="15" GlassFrameThickness="0" UseAeroCaptionButtons="False" />
   </shell:WindowChrome.WindowChrome>
 
-  <Border Background="#F21B191E" BorderBrush="#45FFFFFF" BorderThickness="1"
+  <Border Background="Transparent" BorderBrush="#45FFFFFF" BorderThickness="1"
           CornerRadius="15" Padding="18,16,18,18">
     <Grid>
       <Grid.RowDefinitions>
