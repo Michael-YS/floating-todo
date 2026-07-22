@@ -19,6 +19,8 @@ public sealed class TodoListInfo
     public string? AccountId { get; init; }
     public string? RemoteUrl { get; init; }
     public bool IsLocal { get; init; }
+
+    public override string ToString() => Name;
 }
 
 public sealed class TodoItem
