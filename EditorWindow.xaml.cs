@@ -192,8 +192,15 @@ public partial class EditorWindow : Window
         return true;
     }
 
-    private sealed record PriorityChoice(string Label, TodoPriority Value);
-    private sealed record RecurrenceChoice(string Label, string Rule);
+    private sealed record PriorityChoice(string Label, TodoPriority Value)
+    {
+        public override string ToString() => Label;
+    }
+
+    private sealed record RecurrenceChoice(string Label, string Rule)
+    {
+        public override string ToString() => Label;
+    }
 
     private static readonly List<RecurrenceChoice> RecurrenceChoices =
     [
