@@ -33,26 +33,32 @@ public sealed class CalDavSyncEngine : ICalDavSyncEngine
             return new SyncResult(0, 0, _database.GetConflicts().Select(ToTaskConflict).ToList(), DateTimeOffset.Now);
         }
 
+        var logContext = new SyncLogContext(trigger);
         try
         {
             SetStatus(SyncState.Synchronizing, "正在同步");
-            var uploaded = await UploadPendingAsync(cancellationToken);
+            logContext.Stage = "upload pending changes";
+            var uploaded = await UploadPendingAsync(logContext, cancellationToken);
             var downloaded = 0;
             foreach (var account in _database.GetAccounts().Where(account => account.Enabled))
             {
+                logContext.SetAccount(account);
                 cancellationToken.ThrowIfCancellationRequested();
                 var password = _vault.ReadPassword(account.Id)
                                ?? throw new CalDavException($"账号“{account.Name}”缺少密码");
                 foreach (var calendar in _database.GetCalendars(account.Id, enabledOnly: true))
                 {
+                    logContext.SetCalendar(calendar);
                     if (trigger == SyncTrigger.Scheduled && !string.IsNullOrWhiteSpace(calendar.CTag))
                     {
+                        logContext.Stage = "read calendar state";
                         var state = await _client.GetCalendarStateAsync(account, password, calendar, cancellationToken);
                         if (string.Equals(state.CTag, calendar.CTag, StringComparison.Ordinal))
                         {
                             continue;
                         }
                     }
+                    logContext.Stage = "download calendar";
                     downloaded += await DownloadCalendarAsync(account, password, calendar, cancellationToken);
                 }
             }
@@ -71,6 +77,7 @@ public sealed class CalDavSyncEngine : ICalDavSyncEngine
         }
         catch (Exception exception)
         {
+            AppLogger.Error("CalDAV synchronization failed.", exception, logContext.ToFields());
             SetStatus(SyncState.Error, exception.Message);
             throw;
         }
@@ -80,16 +87,18 @@ public sealed class CalDavSyncEngine : ICalDavSyncEngine
         }
     }
 
-    private async Task<int> UploadPendingAsync(CancellationToken cancellationToken)
+    private async Task<int> UploadPendingAsync(SyncLogContext logContext, CancellationToken cancellationToken)
     {
         var uploaded = 0;
         foreach (var pending in _database.GetPendingChanges())
         {
+            logContext.SetPending(pending);
             cancellationToken.ThrowIfCancellationRequested();
             var password = _vault.ReadPassword(pending.Account.Id)
                            ?? throw new CalDavException($"账号“{pending.Account.Name}”缺少密码");
             if (pending.Operation == OutboxOperation.Delete)
             {
+                logContext.Stage = "delete remote task";
                 if (!string.IsNullOrWhiteSpace(pending.Task.RemoteHref))
                 {
                     await _client.DeleteAsync(
@@ -104,6 +113,7 @@ public sealed class CalDavSyncEngine : ICalDavSyncEngine
             var target = isCreate
                 ? BuildTaskUrl(pending.Calendar.RemoteUrl, pending.Task.Uid)
                 : pending.Task.RemoteHref!;
+            logContext.Stage = isCreate ? "create remote task" : "update remote task";
             var result = await _client.PutAsync(
                 pending.Account,
                 password,
@@ -114,6 +124,7 @@ public sealed class CalDavSyncEngine : ICalDavSyncEngine
                 cancellationToken);
             if (result.Conflict)
             {
+                logContext.Stage = "read conflicting remote task";
                 var server = await _client.GetRawAsync(pending.Account, password, target, cancellationToken);
                 _database.SaveConflict(pending.Task, server.RawICalendar, server.ETag);
                 continue;
@@ -160,8 +171,15 @@ public sealed class CalDavSyncEngine : ICalDavSyncEngine
                 _database.SaveRemoteTask(parsed, resource.RawICalendar, resource.RemoteHref, resource.ETag);
                 downloaded++;
             }
-            catch (FormatException)
+            catch (FormatException exception)
             {
+                AppLogger.Warning(
+                    "Skipped a malformed CalDAV resource.",
+                    exception,
+                    ("account", account.Name),
+                    ("calendar", calendar.DisplayName),
+                    ("calendarUrl", calendar.RemoteUrl),
+                    ("resourceUrl", resource.RemoteHref));
                 // One malformed resource must not block every valid task in the collection.
             }
         }
@@ -190,4 +208,53 @@ public sealed class CalDavSyncEngine : ICalDavSyncEngine
         conflict.LocalICalendar,
         conflict.ServerICalendar,
         ["TITLE", "DESCRIPTION", "DTSTART", "DUE", "PRIORITY", "RRULE", "STATUS"]);
+
+    private sealed class SyncLogContext(SyncTrigger trigger)
+    {
+        public string Stage { get; set; } = "start";
+        private string? AccountName { get; set; }
+        private string? AccountUrl { get; set; }
+        private string? CalendarName { get; set; }
+        private string? CalendarUrl { get; set; }
+        private string? TaskUid { get; set; }
+        private string? Operation { get; set; }
+
+        public void SetAccount(AccountRecord account)
+        {
+            AccountName = account.Name;
+            AccountUrl = account.BaseUrl;
+            CalendarName = null;
+            CalendarUrl = null;
+            TaskUid = null;
+            Operation = null;
+        }
+
+        public void SetCalendar(CalendarRecord calendar)
+        {
+            CalendarName = calendar.DisplayName;
+            CalendarUrl = calendar.RemoteUrl;
+            TaskUid = null;
+            Operation = null;
+        }
+
+        public void SetPending(PendingChange pending)
+        {
+            SetAccount(pending.Account);
+            SetCalendar(pending.Calendar);
+            TaskUid = pending.Task.Uid;
+            Operation = pending.Operation.ToString();
+        }
+
+        public (string Key, string? Value)[] ToFields() =>
+        [
+            ("trigger", trigger.ToString()),
+            ("stage", Stage),
+            ("account", AccountName),
+            ("accountUrl", AccountUrl),
+            ("calendar", CalendarName),
+            ("calendarUrl", CalendarUrl),
+            ("taskUid", TaskUid),
+            ("operation", Operation)
+        ];
+    }
 }

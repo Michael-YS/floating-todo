@@ -50,6 +50,9 @@ public sealed class TodoItem
     [JsonIgnore]
     public bool IsCompleted => CompletedAt is not null;
 
+    [JsonIgnore]
+    public bool IsPlaceholder { get; set; }
+
     public TodoItem Clone() => new()
     {
         Id = Id,
@@ -72,7 +75,8 @@ public sealed class TodoItem
         IsDeleted = IsDeleted,
         HasConflict = HasConflict,
         ParentTaskId = ParentTaskId,
-        IsCompletionShadow = IsCompletionShadow
+        IsCompletionShadow = IsCompletionShadow,
+        IsPlaceholder = IsPlaceholder
     };
 
     public void ApplyFrom(TodoItem other)
@@ -97,5 +101,6 @@ public sealed class TodoItem
         HasConflict = other.HasConflict;
         ParentTaskId = other.ParentTaskId;
         IsCompletionShadow = other.IsCompletionShadow;
+        IsPlaceholder = other.IsPlaceholder;
     }
 }

@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 
 namespace FloatingTodo;
 
@@ -21,6 +22,8 @@ public partial class SettingsWindow : Window
     private readonly CredentialVault _vault;
     private readonly CalDavClient _client;
     private readonly TaskStore _store;
+    private readonly DispatcherTimer _connectionStatusTimer;
+    private bool _refreshingStartup;
 
     public SettingsWindow(AppDatabase database, CredentialVault vault, CalDavClient client, TaskStore store)
     {
@@ -29,10 +32,67 @@ public partial class SettingsWindow : Window
         _vault = vault;
         _client = client;
         _store = store;
+        _connectionStatusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
+        _connectionStatusTimer.Tick += (_, _) =>
+        {
+            _connectionStatusTimer.Stop();
+            ConnectionStatusText.Text = string.Empty;
+        };
+        Closed += (_, _) => _connectionStatusTimer.Stop();
+        RefreshStartupSetting();
         RefreshPanels();
     }
 
     public event Action? ConfigurationChanged;
+
+    private void RefreshStartupSetting()
+    {
+        _refreshingStartup = true;
+        try
+        {
+            StartWithWindowsCheckBox.IsChecked = StartupManager.IsEnabled();
+            StartupStatusText.Text = StartWithWindowsCheckBox.IsChecked == true
+                ? "已开启；下次登录 Windows 时自动运行。"
+                : "使用当前用户启动项，不需要管理员权限。";
+            StartupStatusText.Foreground = (Brush)FindResource("SecondaryText");
+        }
+        catch (Exception exception)
+        {
+            StartWithWindowsCheckBox.IsEnabled = false;
+            StartupStatusText.Text = exception.Message;
+            StartupStatusText.Foreground = BrushFromHex("#FF8A86");
+        }
+        finally
+        {
+            _refreshingStartup = false;
+        }
+    }
+
+    private void StartWithWindows_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_refreshingStartup)
+        {
+            return;
+        }
+
+        var enabled = StartWithWindowsCheckBox.IsChecked == true;
+        try
+        {
+            StartupManager.SetEnabled(enabled);
+            StartupStatusText.Text = enabled
+                ? "已开启；下次登录 Windows 时自动运行。"
+                : "已关闭开机启动。";
+            StartupStatusText.Foreground = (Brush)FindResource("SecondaryText");
+        }
+        catch (Exception exception)
+        {
+            _refreshingStartup = true;
+            StartWithWindowsCheckBox.IsChecked = !enabled;
+            _refreshingStartup = false;
+            StartupStatusText.Text = exception.Message;
+            StartupStatusText.Foreground = BrushFromHex("#FF8A86");
+        }
+    }
 
     private async void Connect_Click(object sender, RoutedEventArgs e)
     {
@@ -81,15 +141,22 @@ public partial class SettingsWindow : Window
                     Palette[index % Palette.Length], true, remote.CTag, remote.SyncToken));
             }
 
+            var removedPlaceholders = _database.DeletePlaceholderTasks();
             _database.SetCalendarsEnabledForAccount("local", false);
             _store.Reload();
             PasswordBox.Clear();
-            ShowStatus($"已发现 {discovered.Count} 个任务清单。", false);
+            var cleanupStatus = removedPlaceholders > 0 ? $"，已移除 {removedPlaceholders} 个示例任务" : string.Empty;
+            ShowStatus($"已发现 {discovered.Count} 个任务清单{cleanupStatus}。", false);
             RefreshPanels();
             ConfigurationChanged?.Invoke();
         }
         catch (Exception exception)
         {
+            AppLogger.Error(
+                "CalDAV account discovery failed.",
+                exception,
+                ("account", name),
+                ("serverUrl", url));
             ShowStatus(exception.Message, true);
         }
         finally
@@ -245,8 +312,13 @@ public partial class SettingsWindow : Window
 
     private void ShowStatus(string text, bool error)
     {
+        _connectionStatusTimer.Stop();
         ConnectionStatusText.Text = text;
         ConnectionStatusText.Foreground = error ? BrushFromHex("#FF8A86") : (Brush)FindResource("SecondaryText");
+        if (error)
+        {
+            _connectionStatusTimer.Start();
+        }
     }
 
     private static Brush BrushFromHex(string value) => new SolidColorBrush((Color)ColorConverter.ConvertFromString(value));

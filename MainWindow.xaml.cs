@@ -15,6 +15,7 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 using Forms = System.Windows.Forms;
 using Color = System.Windows.Media.Color;
+using DrawingIcon = System.Drawing.Icon;
 using DrawingSystemIcons = System.Drawing.SystemIcons;
 
 namespace FloatingTodo;
@@ -64,7 +65,7 @@ public partial class MainWindow : Window
 
         _trayIcon = new Forms.NotifyIcon
         {
-            Icon = DrawingSystemIcons.Application,
+            Icon = LoadApplicationIcon(),
             Text = "Floating Todo",
             Visible = true,
             ContextMenuStrip = BuildTrayMenu()
@@ -77,6 +78,14 @@ public partial class MainWindow : Window
         LocationChanged += (_, _) => NativeWindow.KeepInsideCurrentWorkingArea(this);
         Closing += MainWindow_Closing;
         RefreshTasks();
+    }
+
+    private static DrawingIcon LoadApplicationIcon()
+    {
+        var processPath = Environment.ProcessPath;
+        return string.IsNullOrWhiteSpace(processPath)
+            ? DrawingSystemIcons.Application
+            : DrawingIcon.ExtractAssociatedIcon(processPath) ?? DrawingSystemIcons.Application;
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -173,9 +182,24 @@ public partial class MainWindow : Window
 
     private void Window_Deactivated(object sender, EventArgs e)
     {
+        if (NewTaskPanel.Visibility == Visibility.Visible)
+        {
+            CloseNewTask();
+        }
+
         if (!_isTemporary && !_interactionOpen)
         {
             NativeWindow.SendToDesktop(this);
+        }
+    }
+
+    private void Window_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (NewTaskPanel.Visibility == Visibility.Visible &&
+            !NewTaskPanel.IsMouseOver &&
+            !AddButton.IsMouseOver)
+        {
+            CloseNewTask();
         }
     }
 
@@ -187,7 +211,17 @@ public partial class MainWindow : Window
         }
     }
 
-    private void AddButton_Click(object sender, RoutedEventArgs e) => OpenNewTask();
+    private void AddButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (NewTaskPanel.Visibility == Visibility.Visible)
+        {
+            CloseNewTask();
+        }
+        else
+        {
+            OpenNewTask();
+        }
+    }
 
     private void OpenNewTask()
     {
@@ -309,6 +343,7 @@ public partial class MainWindow : Window
 
     private void CloseNewTask()
     {
+        NewTitleBox.Clear();
         NewTaskPanel.Visibility = Visibility.Collapsed;
         DatePopup.IsOpen = false;
         _interactionOpen = false;

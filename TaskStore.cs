@@ -47,6 +47,7 @@ public sealed class TaskStore
 
     public void Upsert(TodoItem item)
     {
+        item.IsPlaceholder = false;
         var existing = _items.FirstOrDefault(candidate => candidate.Id == item.Id);
         if (existing is null)
         {
@@ -178,13 +179,13 @@ public sealed class TaskStore
         var today = DateTime.Today;
         var samples = new[]
         {
-            new TodoItem { Title = "提交项目报告", ListId = "personal", Due = today.AddDays(-1).AddHours(17), HasDueTime = true, Priority = TodoPriority.High },
-            new TodoItem { Title = "回复邮件", ListId = "work", Due = today.AddHours(10), HasDueTime = true, Priority = TodoPriority.Medium },
-            new TodoItem { Title = "购买硬盘", ListId = "shopping", Due = today },
-            new TodoItem { Title = "预约体检", ListId = "health", Due = today.AddDays(1).AddHours(16).AddMinutes(30), HasDueTime = true },
-            new TodoItem { Title = "整理照片", ListId = "personal", Due = today.AddDays(3) },
-            new TodoItem { Title = "检查服务器备份", ListId = "work", Due = today.AddDays(6), Priority = TodoPriority.Low },
-            new TodoItem { Title = "清理下载目录", ListId = "personal" }
+            new TodoItem { Title = "提交项目报告", ListId = "personal", Due = today.AddDays(-1).AddHours(17), HasDueTime = true, Priority = TodoPriority.High, IsPlaceholder = true },
+            new TodoItem { Title = "回复邮件", ListId = "work", Due = today.AddHours(10), HasDueTime = true, Priority = TodoPriority.Medium, IsPlaceholder = true },
+            new TodoItem { Title = "购买硬盘", ListId = "shopping", Due = today, IsPlaceholder = true },
+            new TodoItem { Title = "预约体检", ListId = "health", Due = today.AddDays(1).AddHours(16).AddMinutes(30), HasDueTime = true, IsPlaceholder = true },
+            new TodoItem { Title = "整理照片", ListId = "personal", Due = today.AddDays(3), IsPlaceholder = true },
+            new TodoItem { Title = "检查服务器备份", ListId = "work", Due = today.AddDays(6), Priority = TodoPriority.Low, IsPlaceholder = true },
+            new TodoItem { Title = "清理下载目录", ListId = "personal", IsPlaceholder = true }
         };
         foreach (var item in samples)
         {

@@ -6,6 +6,7 @@
         WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="False"
         Background="#D91B191E" ShowInTaskbar="False" ShowActivated="False" SizeToContent="Height"
         MouseEnter="Window_MouseEnter" MouseLeave="Window_MouseLeave"
+        PreviewMouseDown="Window_PreviewMouseDown"
         Deactivated="Window_Deactivated">
   <shell:WindowChrome.WindowChrome>
     <shell:WindowChrome CaptionHeight="0" CornerRadius="15" GlassFrameThickness="0" UseAeroCaptionButtons="False" />
@@ -32,7 +33,7 @@
         </StackPanel>
         <TextBlock Grid.Column="1" x:Name="SyncText" Text="本地" Foreground="{StaticResource SecondaryText}"
                    FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0" />
-        <Button Grid.Column="2" Content="＋" Style="{StaticResource IconButton}" FontSize="24"
+        <Button Grid.Column="2" x:Name="AddButton" Content="＋" Style="{StaticResource IconButton}" FontSize="24"
                 Padding="5,0" ToolTip="新建任务" Click="AddButton_Click" />
       </Grid>
 

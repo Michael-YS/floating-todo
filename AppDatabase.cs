@@ -180,7 +180,7 @@ public sealed class AppDatabase
                 SELECT id, uid, calendar_id, remote_href, etag, raw_ics, base_ics,
                        title, description, start_value, due_value, has_due_time,
                        priority, recurrence_rule, completed_at, updated_at,
-                       dirty, deleted, has_conflict
+                       dirty, deleted, has_conflict, is_placeholder
                 FROM tasks
                 """ + (includeDeleted ? string.Empty : " WHERE deleted = 0") + " ORDER BY updated_at";
             using var reader = command.ExecuteReader();
@@ -253,6 +253,17 @@ public sealed class AppDatabase
         }
     }
 
+    public int DeletePlaceholderTasks()
+    {
+        lock (_gate)
+        {
+            using var connection = Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM tasks WHERE is_placeholder = 1";
+            return command.ExecuteNonQuery();
+        }
+    }
+
     public IReadOnlyList<PendingChange> GetPendingChanges()
     {
         lock (_gate)
@@ -264,7 +275,7 @@ public sealed class AppDatabase
                        t.id, t.uid, t.calendar_id, t.remote_href, t.etag, t.raw_ics, t.base_ics,
                        t.title, t.description, t.start_value, t.due_value, t.has_due_time,
                        t.priority, t.recurrence_rule, t.completed_at, t.updated_at,
-                       t.dirty, t.deleted, t.has_conflict,
+                       t.dirty, t.deleted, t.has_conflict, t.is_placeholder,
                        c.id, c.account_id, c.remote_url, c.display_name, c.color, c.enabled, c.ctag, c.sync_token,
                        a.id, a.name, a.base_url, a.username, a.enabled
                 FROM outbox o
@@ -278,9 +289,9 @@ public sealed class AppDatabase
             while (reader.Read())
             {
                 var task = ReadTask(reader, 3);
-                var calendar = ReadCalendar(reader, 22);
+                var calendar = ReadCalendar(reader, 23);
                 var account = new AccountRecord(
-                    reader.GetString(30), reader.GetString(31), reader.GetString(32), reader.GetString(33), reader.GetBoolean(34));
+                    reader.GetString(31), reader.GetString(32), reader.GetString(33), reader.GetString(34), reader.GetBoolean(35));
                 result.Add(new PendingChange(
                     task.Id,
                     Enum.Parse<OutboxOperation>(reader.GetString(1), true),
@@ -463,6 +474,7 @@ public sealed class AppDatabase
                     dirty INTEGER NOT NULL DEFAULT 0,
                     deleted INTEGER NOT NULL DEFAULT 0,
                     has_conflict INTEGER NOT NULL DEFAULT 0,
+                    is_placeholder INTEGER NOT NULL DEFAULT 0,
                     UNIQUE(calendar_id, uid, remote_href)
                 );
 
@@ -485,6 +497,10 @@ public sealed class AppDatabase
                 );
                 """;
             command.ExecuteNonQuery();
+            if (EnsurePlaceholderColumn(connection))
+            {
+                MarkLegacyPrototypeTasks(connection);
+            }
         }
     }
 
@@ -506,12 +522,12 @@ public sealed class AppDatabase
                 id, uid, calendar_id, remote_href, etag, raw_ics, base_ics,
                 title, description, start_value, due_value, has_due_time,
                 priority, recurrence_rule, completed_at, updated_at,
-                dirty, deleted, has_conflict)
+                dirty, deleted, has_conflict, is_placeholder)
             VALUES (
                 $id, $uid, $calendar, $href, $etag, $raw, $base,
                 $title, $description, $start, $due, $hasDueTime,
                 $priority, $recurrence, $completed, $updated,
-                $dirty, $deleted, $conflict)
+                $dirty, $deleted, $conflict, $placeholder)
             ON CONFLICT(id) DO UPDATE SET
                 uid = excluded.uid,
                 calendar_id = excluded.calendar_id,
@@ -530,7 +546,8 @@ public sealed class AppDatabase
                 updated_at = excluded.updated_at,
                 dirty = excluded.dirty,
                 deleted = excluded.deleted,
-                has_conflict = excluded.has_conflict;
+                has_conflict = excluded.has_conflict,
+                is_placeholder = excluded.is_placeholder;
             """;
         command.Parameters.AddWithValue("$id", task.Id.ToString("D"));
         command.Parameters.AddWithValue("$uid", task.Uid);
@@ -551,6 +568,7 @@ public sealed class AppDatabase
         command.Parameters.AddWithValue("$dirty", task.IsDirty);
         command.Parameters.AddWithValue("$deleted", task.IsDeleted);
         command.Parameters.AddWithValue("$conflict", task.HasConflict);
+        command.Parameters.AddWithValue("$placeholder", task.IsPlaceholder);
         command.ExecuteNonQuery();
     }
 
@@ -574,8 +592,54 @@ public sealed class AppDatabase
         UpdatedAt = ParseOffset(reader.GetString(offset + 15)),
         IsDirty = reader.GetBoolean(offset + 16),
         IsDeleted = reader.GetBoolean(offset + 17),
-        HasConflict = reader.GetBoolean(offset + 18)
+        HasConflict = reader.GetBoolean(offset + 18),
+        IsPlaceholder = reader.GetBoolean(offset + 19)
     };
+
+    private static bool EnsurePlaceholderColumn(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA table_info(tasks)";
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            if (string.Equals(reader.GetString(1), "is_placeholder", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        reader.Close();
+        Execute(connection, "ALTER TABLE tasks ADD COLUMN is_placeholder INTEGER NOT NULL DEFAULT 0");
+        return true;
+    }
+
+    private static void MarkLegacyPrototypeTasks(SqliteConnection connection)
+    {
+        Execute(connection, """
+            UPDATE tasks
+            SET is_placeholder = 1
+            WHERE remote_href IS NULL
+              AND etag IS NULL
+              AND dirty = 0
+              AND description = ''
+              AND recurrence_rule = ''
+              AND EXISTS (
+                  SELECT 1
+                  FROM calendars c
+                  JOIN accounts a ON a.id = c.account_id
+                  WHERE c.id = tasks.calendar_id
+                    AND a.id = 'local'
+                    AND a.base_url = 'local://prototype'
+              )
+              AND (
+                  (calendar_id = 'personal' AND title IN ('提交项目报告', '整理照片', '清理下载目录'))
+                  OR (calendar_id = 'work' AND title IN ('回复邮件', '检查服务器备份'))
+                  OR (calendar_id = 'shopping' AND title = '购买硬盘')
+                  OR (calendar_id = 'health' AND title = '预约体检')
+              )
+            """);
+    }
 
     private static CalendarRecord ReadCalendar(SqliteDataReader reader, int offset = 0) => new(
         reader.GetString(offset), reader.GetString(offset + 1), reader.GetString(offset + 2), reader.GetString(offset + 3),

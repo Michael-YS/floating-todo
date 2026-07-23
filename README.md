@@ -9,9 +9,11 @@ Floating Todo 是一个仅面向 Windows 11 的轻量 CalDAV VTODO 桌面 HUD。
 - 在 HUD 内查看、创建和完成任务；新任务默认今天，标题、清单和日期可用一次键盘操作完成。
 - 完成后保留 5 分钟，可再次点击撤销。
 - 托盘左键临时显示 15 秒；悬停暂停，移出后重新计时 15 秒。
+- 可在设置中启用当前用户的 Windows 开机启动。
 - 详情编辑标题、清单、开始时间、截止日期和时间、描述、四档优先级以及 RFC 5545 重复规则。
 - 常用重复预设及高级 RRULE；完成重复任务时写入 `RECURRENCE-ID` 例外，不结束整个系列。
 - 本地 SQLite 缓存和待上传队列，界面操作不等待网络。
+- 同步及未处理异常的详细信息写入 EXE 同目录的 `FloatingTodo.log`，日志达到 2 MB 时自动轮换。
 - ETag 条件写入、逐字段冲突合并、未知 iCalendar 属性保留。
 - 密码只写入 Windows Credential Manager；配置和数据库不保存密码，也不引入应用自定义加密。
 - 插电时每分钟检查，电池供电时每五分钟检查；有 CTag 时先做轻量变更检测。恢复联网或系统唤醒后立即同步。
@@ -41,5 +43,5 @@ $env:DOTNET_CLI_HOME = "$PWD\.dotnet-home"
 ## 已知边界
 
 - 仅支持 HTTPS CalDAV 和 Basic Authentication，已按 Radicale 的标准 CalDAV 端点设计。
-- v0.1.2 仅提供 Windows x64 便携 ZIP，不含安装器、自动更新或开机启动。
+- v0.1.2 仅提供 Windows x64 便携 ZIP，不含安装器或自动更新。
 - 提醒功能不在 v0.1.2 中。

@@ -56,8 +56,19 @@ try
     Check(reparsedRecurring.Due == new DateTime(2026, 7, 23, 10, 0, 0), "recurring task lost its next occurrence after reload");
 
     database.SaveLocalTask(parsed, updated, queueForSync: true);
+    var placeholder = new TodoItem
+    {
+        Title = "Placeholder",
+        ListId = "calendar",
+        IsPlaceholder = true
+    };
+    database.SaveLocalTask(placeholder, codec.Serialize(placeholder), queueForSync: false);
     var loaded = database.LoadTasks();
-    Check(loaded.Count == 1, "database task count mismatch");
+    Check(loaded.Count == 2, "database task count mismatch");
+    Check(loaded.Any(item => item.Id == placeholder.Id && item.IsPlaceholder), "placeholder flag was not persisted");
+    Check(database.DeletePlaceholderTasks() == 1, "placeholder task was not deleted");
+    loaded = database.LoadTasks();
+    Check(loaded.Count == 1 && loaded[0].Id == parsed.Id, "placeholder cleanup deleted a real task");
     Check(loaded[0].IsDirty, "outbox dirty flag missing");
     Check(database.GetPendingChanges().Count == 1, "outbox entry missing");
 
