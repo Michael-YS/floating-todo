@@ -282,6 +282,9 @@ public sealed class AppDatabase
                 JOIN tasks t ON t.id = o.task_id
                 JOIN calendars c ON c.id = t.calendar_id
                 JOIN accounts a ON a.id = c.account_id
+                WHERE a.enabled = 1
+                  AND c.enabled = 1
+                  AND c.account_id <> 'local'
                 ORDER BY o.queued_at;
                 """;
             using var reader = command.ExecuteReader();
@@ -501,6 +504,7 @@ public sealed class AppDatabase
             {
                 MarkLegacyPrototypeTasks(connection);
             }
+            RemoveLocalPendingChanges(connection);
         }
     }
 
@@ -638,6 +642,28 @@ public sealed class AppDatabase
                   OR (calendar_id = 'shopping' AND title = '购买硬盘')
                   OR (calendar_id = 'health' AND title = '预约体检')
               )
+            """);
+    }
+
+    private static void RemoveLocalPendingChanges(SqliteConnection connection)
+    {
+        Execute(connection, """
+            DELETE FROM outbox
+            WHERE task_id IN (
+                SELECT t.id
+                FROM tasks t
+                JOIN calendars c ON c.id = t.calendar_id
+                WHERE c.account_id = 'local'
+            )
+            """);
+        Execute(connection, """
+            UPDATE tasks
+            SET dirty = 0
+            WHERE calendar_id IN (
+                SELECT id
+                FROM calendars
+                WHERE account_id = 'local'
+            )
             """);
     }
 

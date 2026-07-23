@@ -39,7 +39,10 @@ public sealed class TaskStore
                 IsLocal = calendar.AccountId == "local"
             })
             .ToList();
-        _items = _database.LoadTasks().ToList();
+        var visibleListIds = _lists.Select(list => list.Id).ToHashSet(StringComparer.Ordinal);
+        _items = _database.LoadTasks()
+            .Where(item => visibleListIds.Contains(item.ListId))
+            .ToList();
     }
 
     public TodoListInfo GetList(string id) =>

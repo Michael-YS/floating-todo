@@ -14,7 +14,7 @@ try
 {
     var codec = new ICalendarCodec();
     var database = new AppDatabase(databasePath);
-    database.UpsertAccount(new AccountRecord("test", "Test", "https://example.invalid/", "tester", false));
+    database.UpsertAccount(new AccountRecord("test", "Test", "https://example.invalid/", "tester", true));
     database.UpsertCalendar(new CalendarRecord("calendar", "test", "https://example.invalid/tasks/", "Tasks", "#55C9B0", true, null, null));
 
     var task = new TodoItem
@@ -70,7 +70,21 @@ try
     loaded = database.LoadTasks();
     Check(loaded.Count == 1 && loaded[0].Id == parsed.Id, "placeholder cleanup deleted a real task");
     Check(loaded[0].IsDirty, "outbox dirty flag missing");
+
+    database.UpsertAccount(new AccountRecord("local", "Local", "local://prototype", string.Empty, false));
+    database.UpsertCalendar(new CalendarRecord("local-calendar", "local", "local://tasks", "Local", "#55C9B0", true, null, null));
+    var localTask = new TodoItem { Title = "Local only", ListId = "local-calendar" };
+    database.SaveLocalTask(localTask, codec.Serialize(localTask), queueForSync: true);
     Check(database.GetPendingChanges().Count == 1, "outbox entry missing");
+
+    var reopened = new AppDatabase(databasePath);
+    var cleanedLocalTask = reopened.LoadTasks().Single(item => item.Id == localTask.Id);
+    Check(!cleanedLocalTask.IsDirty, "legacy local task remained dirty");
+    Check(reopened.GetPendingChanges().Count == 1, "local outbox cleanup removed a remote change");
+
+    reopened.SetCalendarsEnabledForAccount("local", false);
+    var store = new TaskStore(reopened, codec);
+    Check(store.Items.All(item => item.ListId != "local-calendar"), "disabled local task remained visible");
 
     var vault = new CredentialVault();
     var credentialId = $"core-check-{Guid.NewGuid():N}";
