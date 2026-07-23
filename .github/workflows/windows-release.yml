@@ -1,0 +1,79 @@
+name: Windows release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore FloatingTodo.csproj
+
+      - name: Run core checks
+        run: dotnet run --project tools/CoreChecks/CoreChecks.csproj -c Release --no-restore
+
+      - name: Build release packages
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            ./tools/Publish.ps1 -Version $env:GITHUB_REF_NAME.TrimStart("v") -SkipRestore
+          } else {
+            ./tools/Publish.ps1 -SkipRestore
+          }
+
+      - name: Upload release packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: FloatingTodo-${{ github.sha }}
+          path: artifacts/releases/*.zip
+          compression-level: 0
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@v8
+        with:
+          name: FloatingTodo-${{ github.sha }}
+          path: release-assets
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = Get-ChildItem -LiteralPath release-assets -Filter *.zip |
+            Select-Object -ExpandProperty FullName
+
+          if (gh release view $env:GITHUB_REF_NAME 2>$null) {
+            gh release upload $env:GITHUB_REF_NAME @assets --clobber
+          } else {
+            gh release create $env:GITHUB_REF_NAME @assets `
+              --title $env:GITHUB_REF_NAME `
+              --generate-notes
+          }

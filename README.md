@@ -40,6 +40,21 @@ $env:DOTNET_CLI_HOME = "$PWD\.dotnet-home"
 
 核心检查覆盖 SQLite、离线队列、iCalendar 往返、未知属性、复杂 RRULE、重复任务实例完成和 Credential Manager。
 
+## 发布
+
+不要直接分发 `bin/Release`，其中可能混有普通构建和旧的自包含运行时。使用发布脚本生成干净 ZIP：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\Publish.ps1
+```
+
+输出位于 `artifacts/releases`：
+
+- `portable.zip`：自包含单文件，无需预装 .NET；体积较大。
+- `slim.zip`：单文件精简包，需要目标电脑安装 .NET 8 Desktop Runtime。
+
+GitHub Actions 会在 `main`、Pull Request 和手动触发时运行核心检查并上传两个 ZIP。推送 `v*` 标签时，还会自动创建 GitHub Release 并附加这两个文件。
+
 ## 已知边界
 
 - 仅支持 HTTPS CalDAV 和 Basic Authentication，已按 Radicale 的标准 CalDAV 端点设计。
