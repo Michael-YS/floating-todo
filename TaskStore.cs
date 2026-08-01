@@ -11,6 +11,8 @@ public sealed class TaskStore
     private readonly ICalendarCodec _codec;
     private List<TodoListInfo> _lists = [];
     private List<TodoItem> _items = [];
+    // Completion shadows exist only long enough to offer undo in the HUD. The
+    // persisted recurring master already contains the RECURRENCE-ID exception.
     private readonly Dictionary<Guid, TodoItem> _recurrenceUndo = [];
 
     public TaskStore(AppDatabase? database = null, ICalendarCodec? codec = null)
@@ -172,6 +174,9 @@ public sealed class TaskStore
             return;
         }
 
+        // A brand-new database starts in local-only mode. Sample tasks are
+        // marked as placeholders so the first successful CalDAV connection can
+        // remove them without deleting tasks the user actually created.
         _database.UpsertAccount(new AccountRecord("local", "本地演示", "local://prototype", string.Empty, false));
         foreach (var list in PrototypeLists())
         {

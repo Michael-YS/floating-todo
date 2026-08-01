@@ -360,6 +360,9 @@ public sealed class AppDatabase
                 ("$href", remoteHref), ("$etag", etag), ("$raw", rawICalendar), ("$id", taskId.ToString("D")));
             if (hasNewerLocalChange)
             {
+                // The upload result still supplies the remote identity and base
+                // revision, but it must not replace an edit made while the
+                // request was in flight.
                 Execute(connection, """
                     UPDATE tasks
                     SET raw_ics = $currentRaw, dirty = 1
@@ -646,6 +649,9 @@ public sealed class AppDatabase
             return;
         }
 
+        // An editor can hold a draft created before the initial upload
+        // completed. Preserve the remote identity learned by the database so a
+        // later save updates the resource instead of creating a duplicate.
         task.RemoteHref = reader.GetString(0);
         task.ETag = reader.IsDBNull(1) ? null : reader.GetString(1);
         task.BaseICalendar = reader.GetString(2);
@@ -695,6 +701,9 @@ public sealed class AppDatabase
 
     private static void MarkLegacyPrototypeTasks(SqliteConnection connection)
     {
+        // Older databases predate the explicit placeholder flag. Restrict this
+        // one-time migration to the exact bundled sample rows so user-created
+        // local tasks are never classified as disposable examples.
         Execute(connection, """
             UPDATE tasks
             SET is_placeholder = 1
@@ -722,6 +731,8 @@ public sealed class AppDatabase
 
     private static void RemoveLocalPendingChanges(SqliteConnection connection)
     {
+        // Local calendars use SQLite as their final store and must never enter
+        // the CalDAV outbox, including rows queued by older builds.
         Execute(connection, """
             DELETE FROM outbox
             WHERE task_id IN (

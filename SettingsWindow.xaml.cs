@@ -212,6 +212,9 @@ public partial class SettingsWindow : Window
             }
 
             var removedPlaceholders = _database.DeletePlaceholderTasks();
+            // A successful connection switches the HUD from local-only mode to
+            // remote calendars. Real local tasks remain in SQLite and become
+            // visible again if every CalDAV account is removed.
             _database.SetCalendarsEnabledForAccount("local", false);
             _store.Reload();
             PasswordBox.Clear();

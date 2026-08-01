@@ -6,10 +6,9 @@ using System.Threading.Tasks;
 namespace FloatingTodo;
 
 /// <summary>
-/// Boundary between the HUD and the upcoming CalDAV/SQLite synchronization
-/// implementation. The UI only consumes normalized tasks and sync state; raw
-/// iCalendar data, ETags, outbox operations, and conflict bases stay behind
-/// this interface.
+/// Boundary between the HUD and the CalDAV/SQLite synchronization layer. The
+/// UI consumes normalized sync state while protocol and persistence details
+/// remain behind this interface.
 /// </summary>
 public interface ICalDavSyncEngine
 {
@@ -53,4 +52,3 @@ public sealed record TaskConflict(
     string LocalICalendar,
     string ServerICalendar,
     IReadOnlyList<string> ChangedFields);
-
