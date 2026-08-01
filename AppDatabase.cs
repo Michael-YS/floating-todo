@@ -9,6 +9,7 @@ namespace FloatingTodo;
 
 public sealed class AppDatabase
 {
+    private const int DefaultHudOpacityPercent = 100;
     private readonly string _connectionString;
     private readonly object _gate = new();
 
@@ -45,6 +46,35 @@ public sealed class AppDatabase
             }
 
             return result;
+        }
+    }
+
+    public int GetHudOpacityPercent()
+    {
+        lock (_gate)
+        {
+            using var connection = Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT value FROM app_settings WHERE key = 'hud_opacity_percent'";
+            var value = command.ExecuteScalar() as string;
+            return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var percent)
+                ? Math.Clamp(percent, 0, 100)
+                : DefaultHudOpacityPercent;
+        }
+    }
+
+    public void SetHudOpacityPercent(int percent)
+    {
+        percent = Math.Clamp(percent, 0, 100);
+        lock (_gate)
+        {
+            using var connection = Open();
+            Execute(connection, """
+                INSERT INTO app_settings (key, value)
+                VALUES ('hud_opacity_percent', $value)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                ("$value", percent.ToString(CultureInfo.InvariantCulture)));
         }
     }
 
@@ -516,6 +546,11 @@ public sealed class AppDatabase
                     local_ics TEXT NOT NULL,
                     server_ics TEXT NOT NULL,
                     detected_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
                 );
                 """;
             command.ExecuteNonQuery();

@@ -115,6 +115,13 @@ try
     var cleanedLocalTask = reopened.LoadTasks().Single(item => item.Id == localTask.Id);
     Check(!cleanedLocalTask.IsDirty, "legacy local task remained dirty");
     Check(reopened.GetPendingChanges().Count == 1, "local outbox cleanup removed a remote change");
+    Check(reopened.GetHudOpacityPercent() == 100, "default HUD opacity was not 100 percent");
+    reopened.SetHudOpacityPercent(63);
+    Check(new AppDatabase(databasePath).GetHudOpacityPercent() == 63, "HUD opacity was not persisted");
+    reopened.SetHudOpacityPercent(0);
+    Check(reopened.GetHudOpacityPercent() == 0, "zero HUD opacity was not persisted");
+    reopened.SetHudOpacityPercent(120);
+    Check(reopened.GetHudOpacityPercent() == 100, "HUD opacity was not clamped");
 
     reopened.SetCalendarsEnabledForAccount("local", false);
     var store = new TaskStore(reopened, codec);

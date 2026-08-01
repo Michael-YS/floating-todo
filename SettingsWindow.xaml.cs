@@ -24,6 +24,7 @@ public partial class SettingsWindow : Window
     private readonly TaskStore _store;
     private readonly DispatcherTimer _connectionStatusTimer;
     private bool _refreshingStartup;
+    private bool _updatingOpacity;
 
     public SettingsWindow(AppDatabase database, CredentialVault vault, CalDavClient client, TaskStore store)
     {
@@ -40,10 +41,79 @@ public partial class SettingsWindow : Window
         };
         Closed += (_, _) => _connectionStatusTimer.Stop();
         RefreshStartupSetting();
+        InitializeOpacitySetting();
         RefreshPanels();
     }
 
     public event Action? ConfigurationChanged;
+    public event Action<int>? HudOpacityChanged;
+
+    private void InitializeOpacitySetting()
+    {
+        var percent = _database.GetHudOpacityPercent();
+        _updatingOpacity = true;
+        OpacitySlider.Value = percent;
+        OpacityPercentBox.Text = percent.ToString();
+        _updatingOpacity = false;
+
+        OpacitySlider.ValueChanged += OpacitySlider_ValueChanged;
+        OpacityPercentBox.TextChanged += OpacityPercentBox_TextChanged;
+        OpacityPercentBox.LostKeyboardFocus += OpacityPercentBox_LostKeyboardFocus;
+    }
+
+    private void OpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_updatingOpacity)
+        {
+            return;
+        }
+
+        var percent = (int)Math.Round(e.NewValue);
+        _updatingOpacity = true;
+        OpacityPercentBox.Text = percent.ToString();
+        OpacityPercentBox.ClearValue(Control.BorderBrushProperty);
+        _updatingOpacity = false;
+        SaveHudOpacity(percent);
+    }
+
+    private void OpacityPercentBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_updatingOpacity)
+        {
+            return;
+        }
+
+        if (!int.TryParse(OpacityPercentBox.Text, out var percent) || percent is < 0 or > 100)
+        {
+            OpacityPercentBox.BorderBrush = BrushFromHex("#FF8A86");
+            return;
+        }
+
+        OpacityPercentBox.ClearValue(Control.BorderBrushProperty);
+        _updatingOpacity = true;
+        OpacitySlider.Value = percent;
+        _updatingOpacity = false;
+        SaveHudOpacity(percent);
+    }
+
+    private void OpacityPercentBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (int.TryParse(OpacityPercentBox.Text, out var percent) && percent is >= 0 and <= 100)
+        {
+            return;
+        }
+
+        _updatingOpacity = true;
+        OpacityPercentBox.Text = ((int)Math.Round(OpacitySlider.Value)).ToString();
+        OpacityPercentBox.ClearValue(Control.BorderBrushProperty);
+        _updatingOpacity = false;
+    }
+
+    private void SaveHudOpacity(int percent)
+    {
+        _database.SetHudOpacityPercent(percent);
+        HudOpacityChanged?.Invoke(percent);
+    }
 
     private void RefreshStartupSetting()
     {

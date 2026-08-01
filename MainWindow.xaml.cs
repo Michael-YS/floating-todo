@@ -47,6 +47,7 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         _database = new AppDatabase();
+        Opacity = _database.GetHudOpacityPercent() / 100d;
         _vault = new CredentialVault();
         _calDavClient = new CalDavClient();
         _codec = new ICalendarCodec();
@@ -94,6 +95,7 @@ public partial class MainWindow : Window
         UpdateWorkingArea();
         NativeWindow.ResetToPrimaryTopRight(this);
         NativeWindow.SendToDesktop(this);
+        ApplyConfiguredOpacity(_database.GetHudOpacityPercent());
         if (_database.GetAccounts().Any(account => account.Enabled))
         {
             await SynchronizeAsync(SyncTrigger.Startup);
@@ -137,6 +139,7 @@ public partial class MainWindow : Window
 
     private void ShowTemporarily()
     {
+        Opacity = 1d;
         NativeWindow.ShowTemporarily(this);
         _isTemporary = true;
         ResetTemporaryCountdown();
@@ -166,7 +169,30 @@ public partial class MainWindow : Window
         _temporaryTimer.Stop();
         _temporaryUntil = null;
         _isTemporary = false;
-        NativeWindow.SendToDesktop(this);
+        ApplyConfiguredOpacity(_database.GetHudOpacityPercent());
+    }
+
+    private void ApplyConfiguredOpacity(int percent)
+    {
+        percent = Math.Clamp(percent, 0, 100);
+        if (percent == 0)
+        {
+            // Even a fully transparent desktop-layer window can leave a DWM
+            // composition surface behind. Hiding removes that surface.
+            Opacity = 1d;
+            Hide();
+            return;
+        }
+
+        Opacity = percent / 100d;
+        if (!IsVisible)
+        {
+            Show();
+        }
+        if (!_isTemporary)
+        {
+            NativeWindow.SendToDesktop(this);
+        }
     }
 
     private void Window_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e) => _hovering = true;
@@ -734,6 +760,7 @@ public partial class MainWindow : Window
             RefreshTasks();
             _ = SynchronizeAsync(SyncTrigger.LocalChange);
         };
+        settings.HudOpacityChanged += ApplyConfiguredOpacity;
         settings.ShowDialog();
         _interactionOpen = false;
         if (_isTemporary)

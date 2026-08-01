@@ -17,6 +17,8 @@ internal static class NativeWindow
     private const int WsExToolWindow = 0x00000080;
     private const int DwmUseImmersiveDarkMode = 20;
     private const int DwmWindowCornerPreference = 33;
+    private const int DwmBorderColor = 34;
+    private const int DwmColorNone = unchecked((int)0xFFFFFFFE);
 
     public static void Configure(System.Windows.Window window)
     {
@@ -26,8 +28,12 @@ internal static class NativeWindow
 
         var enabled = 1;
         var rounded = 2;
+        var noBorder = DwmColorNone;
         DwmSetWindowAttribute(handle, DwmUseImmersiveDarkMode, ref enabled, sizeof(int));
         DwmSetWindowAttribute(handle, DwmWindowCornerPreference, ref rounded, sizeof(int));
+        // The HUD draws its own border. Disable the independent Windows 11
+        // frame so it also disappears when WPF opacity reaches zero.
+        DwmSetWindowAttribute(handle, DwmBorderColor, ref noBorder, sizeof(int));
     }
 
     public static void SendToDesktop(System.Windows.Window window)

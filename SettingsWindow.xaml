@@ -18,7 +18,7 @@
         </Grid.ColumnDefinitions>
         <StackPanel>
           <TextBlock Text="设置" FontSize="22" FontWeight="SemiBold" />
-          <TextBlock Text="账号、任务清单与同步" Foreground="{StaticResource SecondaryText}" FontSize="12" Margin="0,4,0,0" />
+          <TextBlock Text="外观、启动、账号与同步" Foreground="{StaticResource SecondaryText}" FontSize="12" Margin="0,4,0,0" />
         </StackPanel>
         <Button Grid.Column="1" Content="✕" Style="{StaticResource IconButton}" Click="Close_Click" />
       </Grid>
@@ -40,6 +40,102 @@
                          Foreground="{StaticResource SecondaryText}"
                          FontSize="11"
                          Margin="24,6,0,0" />
+
+              <Border Height="1" Background="#24FFFFFF" Margin="0,16,0,14" />
+
+              <TextBlock Text="HUD 透明度"
+                         Foreground="{StaticResource PrimaryText}"
+                         FontSize="14" />
+              <Grid Margin="0,9,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="12" />
+                  <ColumnDefinition Width="68" />
+                </Grid.ColumnDefinitions>
+                <Slider x:Name="OpacitySlider"
+                        Minimum="0" Maximum="100" Value="100"
+                        TickFrequency="1" IsSnapToTickEnabled="True"
+                        VerticalAlignment="Center">
+                  <Slider.Resources>
+                    <Style TargetType="Thumb">
+                      <Setter Property="Width" Value="16" />
+                      <Setter Property="Height" Value="16" />
+                      <Setter Property="Cursor" Value="Hand" />
+                      <Setter Property="Template">
+                        <Setter.Value>
+                          <ControlTemplate TargetType="Thumb">
+                            <Ellipse x:Name="ThumbChrome"
+                                     Fill="#6FA8FF"
+                                     Stroke="#D9FFFFFF"
+                                     StrokeThickness="1" />
+                            <ControlTemplate.Triggers>
+                              <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ThumbChrome" Property="Fill" Value="#85B7FF" />
+                              </Trigger>
+                              <Trigger Property="IsDragging" Value="True">
+                                <Setter TargetName="ThumbChrome" Property="Fill" Value="#9CC5FF" />
+                              </Trigger>
+                            </ControlTemplate.Triggers>
+                          </ControlTemplate>
+                        </Setter.Value>
+                      </Setter>
+                    </Style>
+                  </Slider.Resources>
+                  <Slider.Template>
+                    <ControlTemplate TargetType="Slider">
+                      <Grid Height="20" VerticalAlignment="Center">
+                        <Border Height="4"
+                                Background="#2B000000"
+                                BorderBrush="#38FFFFFF"
+                                BorderThickness="1"
+                                CornerRadius="2"
+                                VerticalAlignment="Center" />
+                        <Track x:Name="PART_Track">
+                          <Track.DecreaseRepeatButton>
+                            <RepeatButton Command="Slider.DecreaseLarge"
+                                          Background="#6FA8FF"
+                                          BorderThickness="0">
+                              <RepeatButton.Template>
+                                <ControlTemplate TargetType="RepeatButton">
+                                  <Border Background="{TemplateBinding Background}"
+                                          CornerRadius="2" Height="4"
+                                          VerticalAlignment="Center" />
+                                </ControlTemplate>
+                              </RepeatButton.Template>
+                            </RepeatButton>
+                          </Track.DecreaseRepeatButton>
+                          <Track.Thumb>
+                            <Thumb />
+                          </Track.Thumb>
+                          <Track.IncreaseRepeatButton>
+                            <RepeatButton Command="Slider.IncreaseLarge"
+                                          Background="Transparent"
+                                          BorderThickness="0" />
+                          </Track.IncreaseRepeatButton>
+                        </Track>
+                      </Grid>
+                    </ControlTemplate>
+                  </Slider.Template>
+                </Slider>
+                <Grid Grid.Column="2">
+                  <TextBox x:Name="OpacityPercentBox"
+                           Style="{StaticResource GlassTextBox}"
+                           Height="38" Padding="8,7,24,7"
+                           MaxLength="3"
+                           TextAlignment="Center"
+                           VerticalContentAlignment="Center" />
+                  <TextBlock Text="%"
+                             Foreground="{StaticResource SecondaryText}"
+                             HorizontalAlignment="Right"
+                             VerticalAlignment="Center"
+                             Margin="0,0,9,0"
+                             IsHitTestVisible="False" />
+                </Grid>
+              </Grid>
+              <TextBlock Text="透明度越低，越能看清 HUD 后面的窗口内容；支持 0–100%。"
+                         Foreground="{StaticResource SecondaryText}"
+                         FontSize="11"
+                         Margin="0,7,0,0" />
             </StackPanel>
           </Border>
 
