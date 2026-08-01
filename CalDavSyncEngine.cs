@@ -28,10 +28,10 @@ public sealed class CalDavSyncEngine : ICalDavSyncEngine
 
     public async Task<SyncResult> SynchronizeAsync(SyncTrigger trigger, CancellationToken cancellationToken = default)
     {
-        if (!await _syncGate.WaitAsync(0, cancellationToken))
-        {
-            return new SyncResult(0, 0, _database.GetConflicts().Select(ToTaskConflict).ToList(), DateTimeOffset.Now);
-        }
+        // Do not drop a local-change sync just because another synchronization
+        // is finishing a create. The queued pass is what uploads edits made
+        // while that create was in flight.
+        await _syncGate.WaitAsync(cancellationToken);
 
         var logContext = new SyncLogContext(trigger);
         try
@@ -154,9 +154,15 @@ public sealed class CalDavSyncEngine : ICalDavSyncEngine
         {
             remoteHrefs.Add(resource.RemoteHref);
             localByHref.TryGetValue(resource.RemoteHref, out var local);
-            if (local is not null && local.IsDirty && !EtagEquals(local.ETag, resource.ETag))
+            if (local is not null && local.IsDirty)
             {
-                _database.SaveConflict(local, resource.RawICalendar, resource.ETag);
+                if (!EtagEquals(local.ETag, resource.ETag))
+                {
+                    _database.SaveConflict(local, resource.RawICalendar, resource.ETag);
+                }
+
+                // A matching ETag means the server is still at our edit's
+                // base revision. Keep the local pending change for upload.
                 continue;
             }
 

@@ -200,6 +200,7 @@ public sealed class AppDatabase
         {
             using var connection = Open();
             using var transaction = connection.BeginTransaction();
+            HydrateMissingRemoteState(connection, task);
             task.RawICalendar = rawICalendar;
             task.IsDirty = queueForSync;
             task.UpdatedAt = DateTimeOffset.Now;
@@ -314,6 +315,12 @@ public sealed class AppDatabase
         {
             using var connection = Open();
             using var transaction = connection.BeginTransaction();
+            using var currentCommand = connection.CreateCommand();
+            currentCommand.CommandText = "SELECT raw_ics FROM tasks WHERE id = $id";
+            currentCommand.Parameters.AddWithValue("$id", taskId.ToString("D"));
+            var currentRaw = currentCommand.ExecuteScalar() as string;
+            var hasNewerLocalChange = currentRaw is not null &&
+                                      !string.Equals(currentRaw, rawICalendar, StringComparison.Ordinal);
             Execute(connection, """
                 UPDATE tasks
                 SET remote_href = $href, etag = $etag, raw_ics = $raw, base_ics = $raw,
@@ -321,8 +328,20 @@ public sealed class AppDatabase
                 WHERE id = $id
                 """,
                 ("$href", remoteHref), ("$etag", etag), ("$raw", rawICalendar), ("$id", taskId.ToString("D")));
-            Execute(connection, "DELETE FROM outbox WHERE task_id = $id", ("$id", taskId.ToString("D")));
-            Execute(connection, "DELETE FROM conflicts WHERE task_id = $id", ("$id", taskId.ToString("D")));
+            if (hasNewerLocalChange)
+            {
+                Execute(connection, """
+                    UPDATE tasks
+                    SET raw_ics = $currentRaw, dirty = 1
+                    WHERE id = $id
+                    """,
+                    ("$currentRaw", currentRaw), ("$id", taskId.ToString("D")));
+            }
+            else
+            {
+                Execute(connection, "DELETE FROM outbox WHERE task_id = $id", ("$id", taskId.ToString("D")));
+                Execute(connection, "DELETE FROM conflicts WHERE task_id = $id", ("$id", taskId.ToString("D")));
+            }
             transaction.Commit();
         }
     }
@@ -574,6 +593,27 @@ public sealed class AppDatabase
         command.Parameters.AddWithValue("$conflict", task.HasConflict);
         command.Parameters.AddWithValue("$placeholder", task.IsPlaceholder);
         command.ExecuteNonQuery();
+    }
+
+    private static void HydrateMissingRemoteState(SqliteConnection connection, TodoItem task)
+    {
+        if (!string.IsNullOrWhiteSpace(task.RemoteHref))
+        {
+            return;
+        }
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT remote_href, etag, base_ics FROM tasks WHERE id = $id";
+        command.Parameters.AddWithValue("$id", task.Id.ToString("D"));
+        using var reader = command.ExecuteReader();
+        if (!reader.Read() || reader.IsDBNull(0))
+        {
+            return;
+        }
+
+        task.RemoteHref = reader.GetString(0);
+        task.ETag = reader.IsDBNull(1) ? null : reader.GetString(1);
+        task.BaseICalendar = reader.GetString(2);
     }
 
     private static TodoItem ReadTask(SqliteDataReader reader, int offset = 0) => new()

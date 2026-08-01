@@ -38,6 +38,13 @@ try
     Check(parsed.Priority == TodoPriority.High, "priority did not round-trip");
     Check(parsed.RecurrenceRule.Contains("BYSETPOS=-1", StringComparison.Ordinal), "complex recurrence did not round-trip");
 
+    parsed.Due = null;
+    parsed.HasDueTime = false;
+    var withoutDue = codec.Serialize(parsed);
+    var reparsedWithoutDue = codec.Parse(withoutDue, "calendar", "https://example.invalid/tasks/test.ics", "\"etag-2\"", task.Id);
+    Check(reparsedWithoutDue.Due is null, "cleared due date reappeared after round-trip");
+    Check(!reparsedWithoutDue.HasDueTime, "cleared due date retained its time flag");
+
     var daily = new TodoItem
     {
         Title = "Daily",
@@ -56,6 +63,33 @@ try
     Check(reparsedRecurring.Due == new DateTime(2026, 7, 23, 10, 0, 0), "recurring task lost its next occurrence after reload");
 
     database.SaveLocalTask(parsed, updated, queueForSync: true);
+
+    var racingTask = new TodoItem { Title = "Create in flight", ListId = "calendar", Due = new DateTime(2026, 7, 24) };
+    var racingCreateRaw = codec.Serialize(racingTask);
+    database.SaveLocalTask(racingTask, racingCreateRaw, queueForSync: true);
+    racingTask.Due = null;
+    var racingEditRaw = codec.Serialize(racingTask);
+    database.SaveLocalTask(racingTask, racingEditRaw, queueForSync: true);
+    database.MarkUploadSucceeded(racingTask.Id, "https://example.invalid/tasks/race.ics", "\"race-1\"", racingCreateRaw);
+    var preservedEdit = database.LoadTasks().Single(item => item.Id == racingTask.Id);
+    Check(preservedEdit.RawICalendar == racingEditRaw && preservedEdit.IsDirty, "in-flight create overwrote a newer local edit");
+    Check(database.GetPendingChanges().Any(change => change.TaskId == racingTask.Id), "newer local edit was removed from the outbox");
+    Check(preservedEdit.RemoteHref == "https://example.invalid/tasks/race.ics" && preservedEdit.ETag == "\"race-1\"", "create result did not hydrate remote identity");
+    database.MarkUploadSucceeded(racingTask.Id, preservedEdit.RemoteHref!, "\"race-2\"", racingEditRaw);
+    Check(!database.LoadTasks().Single(item => item.Id == racingTask.Id).IsDirty, "latest local edit remained dirty after upload");
+
+    var staleDraft = racingTask.Clone();
+    staleDraft.RemoteHref = null;
+    staleDraft.ETag = null;
+    staleDraft.BaseICalendar = string.Empty;
+    staleDraft.Title = "Edited from stale UI state";
+    var staleDraftRaw = codec.Serialize(staleDraft);
+    database.SaveLocalTask(staleDraft, staleDraftRaw, queueForSync: true);
+    var hydratedDraft = database.LoadTasks().Single(item => item.Id == racingTask.Id);
+    Check(hydratedDraft.RemoteHref == "https://example.invalid/tasks/race.ics" && hydratedDraft.ETag == "\"race-2\"", "stale editor state erased remote identity");
+    database.MarkUploadSucceeded(racingTask.Id, hydratedDraft.RemoteHref!, "\"race-3\"", staleDraftRaw);
+    database.MarkTaskDeleted(hydratedDraft, queueForSync: false);
+
     var placeholder = new TodoItem
     {
         Title = "Placeholder",

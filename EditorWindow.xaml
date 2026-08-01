@@ -56,7 +56,7 @@
             </Grid.ColumnDefinitions>
             <StackPanel>
               <TextBlock Text="截止日期" Foreground="{StaticResource SecondaryText}" Margin="0,0,0,6" />
-              <DatePicker x:Name="DueDatePicker" Height="38" />
+              <DatePicker x:Name="DueDatePicker" Height="38" SelectedDateChanged="DueDatePicker_SelectedDateChanged" />
             </StackPanel>
             <StackPanel Grid.Column="2">
               <TextBlock Text="时间（可选）" Foreground="{StaticResource SecondaryText}" Margin="0,0,0,6" />
@@ -94,4 +94,3 @@
     </Grid>
   </Border>
 </Window>
-

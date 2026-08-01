@@ -101,6 +101,17 @@ public partial class EditorWindow : Window
         }
     }
 
+    private void DueDatePicker_SelectedDateChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        // A time cannot exist without its date. In particular, clear the old
+        // time when an existing task's due date is removed so closing the
+        // editor does not reject the now-stale time value.
+        if (DueDatePicker.SelectedDate is null)
+        {
+            DueTimeBox.Clear();
+        }
+    }
+
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
         if (!_discarded && !_deleted)
