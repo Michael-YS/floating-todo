@@ -26,7 +26,10 @@ jobs:
           dotnet-version: "8.0.x"
 
       - name: Restore
-        run: dotnet restore FloatingTodo.csproj
+        shell: pwsh
+        run: |
+          dotnet restore tools/CoreChecks/CoreChecks.csproj
+          dotnet restore FloatingTodo.csproj -r win-x64
 
       - name: Run core checks
         run: dotnet run --project tools/CoreChecks/CoreChecks.csproj -c Release --no-restore

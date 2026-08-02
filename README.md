@@ -66,5 +66,5 @@ GitHub Actions 会在 `main`、Pull Request 和手动触发时运行核心检查
 
 - CalDAV 同步是可选功能；启用后仅支持 HTTPS 和 Basic Authentication，已按 Radicale 的标准 CalDAV 端点设计。
 - 当前版本不会在本地清单与 CalDAV 清单之间自动迁移任务。
-- v0.1.2 仅提供 Windows x64 便携 ZIP，不含安装器或自动更新。
-- 提醒功能不在 v0.1.2 中。
+- v0.1.3 仅提供 Windows x64 便携 ZIP，不含安装器或自动更新。
+- 提醒功能不在 v0.1.3 中。
