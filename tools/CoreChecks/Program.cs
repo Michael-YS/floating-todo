@@ -15,7 +15,21 @@ try
     var codec = new ICalendarCodec();
     var database = new AppDatabase(databasePath);
     database.UpsertAccount(new AccountRecord("test", "Test", "https://example.invalid/", "tester", true));
-    database.UpsertCalendar(new CalendarRecord("calendar", "test", "https://example.invalid/tasks/", "Tasks", "#55C9B0", true, null, null));
+    database.UpsertCalendar(new CalendarRecord("calendar", "test", "https://example.invalid/tasks/", "Tasks", "#55C9B0", false, null, null));
+
+    var discoveryUpdate = CalendarDiscoveryUpdater.Apply(database, "test",
+    [
+        new DiscoveredCalendar("https://example.invalid/tasks/", "Renamed Tasks", "ctag-1", "sync-1"),
+        new DiscoveredCalendar("https://example.invalid/new/", "New Tasks", "ctag-2", "sync-2")
+    ], ["#55C9B0", "#6FA8FF"]);
+    var discoveredCalendars = database.GetCalendars("test");
+    Check(discoveryUpdate == new CalendarDiscoveryUpdate(2, 1), "calendar rediscovery counts were incorrect");
+    Check(discoveredCalendars.Count == 2, "calendar rediscovery did not add exactly one calendar");
+    Check(discoveredCalendars.Single(calendar => calendar.Id == "calendar") is { DisplayName: "Renamed Tasks", Color: "#55C9B0", Enabled: false, CTag: "ctag-1", SyncToken: "sync-1" },
+        "calendar rediscovery did not update remote state while preserving presentation");
+    Check(discoveredCalendars.Single(calendar => calendar.RemoteUrl.EndsWith("/new/", StringComparison.Ordinal)).Enabled,
+        "newly discovered calendar was not enabled");
+    database.UpdateCalendarPresentation("calendar", true, "#55C9B0");
 
     var task = new TodoItem
     {

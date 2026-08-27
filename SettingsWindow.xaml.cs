@@ -191,25 +191,7 @@ public partial class SettingsWindow : Window
 
             _database.UpsertAccount(account);
             _vault.WritePassword(accountId, username, password);
-            var existing = _database.GetCalendars(accountId).ToDictionary(calendar => calendar.RemoteUrl, StringComparer.OrdinalIgnoreCase);
-            for (var index = 0; index < discovered.Count; index++)
-            {
-                var remote = discovered[index];
-                if (existing.TryGetValue(remote.RemoteUrl, out var known))
-                {
-                    _database.UpsertCalendar(known with
-                    {
-                        DisplayName = remote.DisplayName,
-                        CTag = remote.CTag,
-                        SyncToken = remote.SyncToken
-                    });
-                    continue;
-                }
-
-                _database.UpsertCalendar(new CalendarRecord(
-                    Guid.NewGuid().ToString("D"), accountId, remote.RemoteUrl, remote.DisplayName,
-                    Palette[index % Palette.Length], true, remote.CTag, remote.SyncToken));
-            }
+            CalendarDiscoveryUpdater.Apply(_database, accountId, discovered, Palette);
 
             var removedPlaceholders = _database.DeletePlaceholderTasks();
             // A successful connection switches the HUD from local-only mode to
@@ -246,6 +228,7 @@ public partial class SettingsWindow : Window
             var row = new Grid { Margin = new Thickness(0, 0, 0, 7) };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var text = new StackPanel();
             text.Children.Add(new TextBlock { Text = account.Name, FontWeight = FontWeights.SemiBold });
             text.Children.Add(new TextBlock
@@ -256,6 +239,19 @@ public partial class SettingsWindow : Window
                 TextTrimming = TextTrimming.CharacterEllipsis
             });
             row.Children.Add(text);
+            var rediscover = new Button
+            {
+                Content = "重新发现清单",
+                Foreground = (Brush)FindResource("PrimaryText"),
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(10, 5, 10, 5),
+                Tag = account,
+                ToolTip = "从服务器查找此账号新建的 VTODO 清单"
+            };
+            rediscover.Click += RediscoverCalendars_Click;
+            Grid.SetColumn(rediscover, 1);
+            row.Children.Add(rediscover);
             var delete = new Button
             {
                 Content = "删除",
@@ -266,7 +262,7 @@ public partial class SettingsWindow : Window
                 Tag = account
             };
             delete.Click += DeleteAccount_Click;
-            Grid.SetColumn(delete, 1);
+            Grid.SetColumn(delete, 2);
             row.Children.Add(delete);
             AccountsPanel.Children.Add(row);
         }
@@ -326,6 +322,44 @@ public partial class SettingsWindow : Window
             Grid.SetColumn(accountText, 2);
             row.Children.Add(accountText);
             CalendarsPanel.Children.Add(row);
+        }
+    }
+
+    private async void RediscoverCalendars_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: AccountRecord account } button)
+        {
+            return;
+        }
+
+        button.IsEnabled = false;
+        ShowStatus($"正在为“{account.Name}”重新发现 VTODO 清单…", false);
+        try
+        {
+            var password = _vault.ReadPassword(account.Id)
+                           ?? throw new CalDavException($"账号“{account.Name}”缺少密码，请删除后重新添加账号");
+            var discovered = await _client.DiscoverAsync(account, password);
+            var update = CalendarDiscoveryUpdater.Apply(_database, account.Id, discovered, Palette);
+            _store.Reload();
+            RefreshPanels();
+            ConfigurationChanged?.Invoke();
+
+            ShowStatus(update.AddedCount > 0
+                ? $"已发现 {update.DiscoveredCount} 个任务清单，其中新增 {update.AddedCount} 个。"
+                : $"已发现 {update.DiscoveredCount} 个任务清单，没有新清单。", false);
+        }
+        catch (Exception exception)
+        {
+            AppLogger.Error(
+                "CalDAV calendar rediscovery failed.",
+                exception,
+                ("account", account.Name),
+                ("serverUrl", account.BaseUrl));
+            ShowStatus(exception.Message, true);
+        }
+        finally
+        {
+            button.IsEnabled = true;
         }
     }
 
