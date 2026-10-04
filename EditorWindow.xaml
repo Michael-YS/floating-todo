@@ -72,8 +72,34 @@
                    AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" />
 
           <TextBlock Text="高级重复规则" Foreground="{StaticResource SecondaryText}" Margin="0,18,0,6" />
+          <ComboBox x:Name="RecurrencePresetBox" Height="38" Margin="0,0,0,8" SelectionChanged="RecurrencePresetBox_SelectionChanged" />
+          <StackPanel x:Name="RecurrencePanel" Visibility="Collapsed" Margin="0,0,0,10">
+            <TextBlock Text="频率与间隔" Foreground="{StaticResource SecondaryText}" Margin="0,0,0,6" />
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="100"/></Grid.ColumnDefinitions>
+              <ComboBox x:Name="FrequencyBox" Height="38" SelectionChanged="RecurrenceOptions_SelectionChanged" />
+              <TextBox Grid.Column="2" x:Name="IntervalBox" Text="1" ToolTip="每隔几个周期重复" />
+            </Grid>
+            <StackPanel x:Name="WeeklyPanel" Margin="0,10,0,0" Visibility="Collapsed">
+              <TextBlock Text="每周哪些天（不选时沿用起始日）" Foreground="{StaticResource SecondaryText}" Margin="0,0,0,6" />
+              <WrapPanel x:Name="WeekdayPanel" />
+            </StackPanel>
+            <StackPanel x:Name="MonthlyPanel" Margin="0,10,0,0" Visibility="Collapsed">
+              <ComboBox x:Name="MonthModeBox" Height="38" SelectionChanged="RecurrenceOptions_SelectionChanged" />
+              <TextBox x:Name="MonthDaysBox" Margin="0,8,0,0" Text="1" Visibility="Collapsed" ToolTip="逗号分隔日期，如 1,15,-1；-1 表示最后一天" />
+              <Grid x:Name="MonthWeekPanel" Margin="0,8,0,0" Visibility="Collapsed">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <ComboBox x:Name="PositionBox" Height="38" />
+                <ComboBox Grid.Column="2" x:Name="MonthWeekdayBox" Height="38" />
+              </Grid>
+            </StackPanel>
+            <TextBlock Text="结束条件" Foreground="{StaticResource SecondaryText}" Margin="0,10,0,6" />
+            <ComboBox x:Name="EndModeBox" Height="38" SelectionChanged="RecurrenceOptions_SelectionChanged" />
+            <TextBox x:Name="CountBox" Margin="0,8,0,0" Text="10" Visibility="Collapsed" ToolTip="总次数包含第一次" />
+            <DatePicker x:Name="UntilPicker" Height="38" Margin="0,8,0,0" Visibility="Collapsed" />
+          </StackPanel>
           <TextBox x:Name="RecurrenceBox" Style="{StaticResource GlassTextBox}" ToolTip="例如 FREQ=WEEKLY;BYDAY=MO,WE,FR" />
-          <TextBlock Text="原型阶段先无损保存 RRULE；可视化规则编辑器将在 CalDAV 层接入时补齐。"
+          <TextBlock Text="高级配置在关闭时生成规则。原始 RRULE 模式支持更多组合；无法用表单表示的已有规则会自动保留在此模式。重复任务需要开始或截止日期。"
                      Foreground="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" />
         </StackPanel>
       </ScrollViewer>

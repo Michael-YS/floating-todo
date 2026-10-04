@@ -1,4 +1,5 @@
 using FloatingTodo;
+using System.IO;
 
 var failures = new List<string>();
 void Check(bool condition, string message)
@@ -13,6 +14,56 @@ var databasePath = Path.Combine(root, $"checks-{Guid.NewGuid():N}.db");
 try
 {
     var codec = new ICalendarCodec();
+    var editorThread = new Thread(() =>
+    {
+        try { EditorChecks.Run(Check); }
+        catch (Exception ex) { Check(false, "recurrence editor check failed: " + ex); }
+    });
+    editorThread.SetApartmentState(ApartmentState.STA);
+    editorThread.Start();
+    editorThread.Join();
+    var fortnightly = new RecurrenceConfiguration { Frequency = "WEEKLY", Interval = 2, Days = ["MO", "WE", "FR"], Count = 6 };
+    Check(fortnightly.Build(false) == "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR;COUNT=6", "weekly configuration generated an incorrect rule");
+    var lastMonday = new RecurrenceConfiguration { Frequency = "MONTHLY", Days = ["MO"], Position = -1, Count = 2 };
+    Check(RecurrenceConfiguration.TryParse(lastMonday.Build(true), true, out var loadedMonthly) && loadedMonthly.Position == -1,
+        "monthly weekday configuration did not load");
+    Check(RecurrenceConfiguration.TryParse("FREQ=MONTHLY;BYDAY=-1MO", true, out var ordinalMonthly) && ordinalMonthly.Position == -1 && ordinalMonthly.Days.SequenceEqual(new[] { "MO" }),
+        "ordinal weekday rule did not load into visual mode");
+    var monthDates = new RecurrenceConfiguration { Frequency = "MONTHLY", MonthDays = "1, 15,-1" };
+    Check(monthDates.Build(false) == "FREQ=MONTHLY;BYMONTHDAY=1,15,-1", "monthly dates configuration failed");
+    foreach (var unsupported in new[] { "FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU", "FREQ=WEEKLY;WKST=SU;BYDAY=MO", "FREQ=MONTHLY;BYDAY=MO,FR;BYSETPOS=-1", "FREQ=DAILY;COUNT=2;COUNT=3" })
+        Check(!RecurrenceConfiguration.TryParse(unsupported, true, out _), "unsupported rule would lose fields in visual mode: " + unsupported);
+    foreach (var invalid in new[] { new RecurrenceConfiguration { Interval = 0 }, new RecurrenceConfiguration { Count = 0 },
+        new RecurrenceConfiguration { Frequency = "MONTHLY", MonthDays = "0" }, new RecurrenceConfiguration { Frequency = "MONTHLY", MonthDays = "32" },
+        new RecurrenceConfiguration { Count = 2, Until = DateTime.Today } })
+    {
+        var rejected = false;
+        try { invalid.Build(false); } catch (FormatException) { rejected = true; }
+        Check(rejected, "invalid recurrence configuration was accepted");
+    }
+    foreach (var timed in new[] { false, true })
+    {
+        var ending = new RecurrenceConfiguration { Frequency = "DAILY", Until = new DateTime(2026, 10, 31) };
+        var endingRule = ending.Build(timed);
+        codec.ValidateRecurrence(endingRule);
+        Check(RecurrenceConfiguration.TryParse(endingRule, timed, out var loadedEnd) && loadedEnd.Until == ending.Until,
+            "recurrence end date did not round-trip");
+        var endingTask = new TodoItem { Title = "Until", Due = new DateTime(2026, 10, 30, timed ? 9 : 0, 0, 0), HasDueTime = timed, RecurrenceRule = endingRule };
+        endingTask.RawICalendar = codec.Serialize(endingTask);
+        var next = codec.CompleteOccurrence(endingTask, DateTimeOffset.Now).NextOccurrence;
+        Check(next?.Due?.Date == new DateTime(2026, 10, 31), $"end date excluded its final day (timed={timed}): {next?.Due:O}");
+        if (next is not null) Check(codec.CompleteOccurrence(next, DateTimeOffset.Now).NextOccurrence is null, "recurrence continued after UNTIL");
+    }
+    var monthlyTask = new TodoItem { Title = "Last Monday", Start = new DateTime(2026, 10, 26, 9, 0, 0), Due = new DateTime(2026, 10, 26, 10, 0, 0), HasDueTime = true, RecurrenceRule = lastMonday.Build(true) };
+    monthlyTask.RawICalendar = codec.Serialize(monthlyTask);
+    var nextMonthly = codec.CompleteOccurrence(monthlyTask, DateTimeOffset.Now).NextOccurrence;
+    Check(nextMonthly?.Due == new DateTime(2026, 11, 30, 10, 0, 0), $"last weekday recurrence did not advance correctly: {nextMonthly?.Due:O}");
+    if (nextMonthly is not null)
+    {
+        nextMonthly.Title = "Edited second occurrence";
+        nextMonthly.RawICalendar = codec.Serialize(nextMonthly);
+        Check(codec.CompleteOccurrence(nextMonthly, DateTimeOffset.Now).NextOccurrence is null, "COUNT restarted after editing the next occurrence");
+    }
     var database = new AppDatabase(databasePath);
     database.UpsertAccount(new AccountRecord("test", "Test", "https://example.invalid/", "tester", true));
     database.UpsertCalendar(new CalendarRecord("calendar", "test", "https://example.invalid/tasks/", "Tasks", "#55C9B0", false, null, null));

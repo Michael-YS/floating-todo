@@ -15,7 +15,8 @@ Floating Todo 是一个仅面向 Windows 11 的轻量、本地优先桌面待办
 - 可在设置中通过滑块或百分比输入调整 HUD 透明度；设为 0% 时隐藏 HUD，仍可通过托盘临时显示。
 - CalDAV 服务器新增任务清单后，可在设置的账号旁点击“重新发现清单”，无需删除并重新添加账号；已有清单的启用状态和颜色会保留。
 - 详情编辑标题、清单、开始时间、截止日期和时间、描述、四档优先级以及 RFC 5545 重复规则。
-- 常用重复预设及高级 RRULE；完成重复任务时写入 `RECURRENCE-ID` 例外，不结束整个系列。
+- 常用重复预设及高级可视化配置：按天／周／月／年设置间隔，每周多选星期，每月指定多个日期（负数从月底倒数）或第几个／最后一个星期几；可按总次数或截至日期结束。原始 RRULE 模式保留更多 RFC 5545 组合，无法由表单表示的已有规则会自动进入原始模式。
+- 重复任务需要开始或截止日期；总次数包含第一次，截至日期包含当天。按月指定不存在的日期时跳过该月（例如每月 31 日不会自动变成 30 日）；每年日期沿用任务起始日。关闭编辑窗口保存配置，“撤销本次编辑”放弃修改。完成重复任务时写入 `RECURRENCE-ID` 例外，不结束整个系列。
 - 任务保存在本地 SQLite；CalDAV 任务的离线改动进入待上传队列，界面操作不等待网络。
 - 同步及未处理异常的详细信息写入 EXE 同目录的 `FloatingTodo.log`，日志达到 2 MB 时自动轮换。
 - ETag 条件写入、逐字段冲突合并、未知 iCalendar 属性保留。
@@ -46,7 +47,7 @@ dotnet build .\FloatingTodo.csproj -c Release --no-restore
 dotnet run --project .\tools\CoreChecks\CoreChecks.csproj -c Release --no-restore
 ```
 
-核心检查覆盖 SQLite、离线队列、iCalendar 往返、未知属性、复杂 RRULE、重复任务实例完成和 Credential Manager。
+核心检查覆盖 SQLite、离线队列、iCalendar 往返、未知属性、重复配置表单保存与模式切换、复杂 RRULE、重复任务实例完成、次数／日期终止、跨夏令时和 Credential Manager。
 
 ## 发布
 

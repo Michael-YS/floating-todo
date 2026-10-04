@@ -90,8 +90,26 @@ public sealed class ICalendarCodec
         todo.Uid = string.IsNullOrWhiteSpace(task.Uid) ? Guid.NewGuid().ToString("D") : task.Uid;
         todo.Summary = task.Title;
         todo.Description = task.Description;
-        todo.DtStart = ToCalDateTime(task.Start, task.Start is not null);
-        todo.Due = ToCalDateTime(task.Due, task.HasDueTime);
+        var preserveDates = false;
+        if (!string.IsNullOrWhiteSpace(task.RecurrenceRule) && !string.IsNullOrWhiteSpace(task.RawICalendar) && todo.RecurrenceRule is not null)
+        {
+            var current = Parse(task.RawICalendar, task.ListId, task.RemoteHref ?? string.Empty, task.ETag);
+            preserveDates = current.Start == task.Start && current.Due == task.Due && current.HasDueTime == task.HasDueTime;
+        }
+        // Keep the series anchor when editing the projected next occurrence,
+        // otherwise COUNT restarts after every title/configuration edit.
+        if (!preserveDates)
+        {
+            string? zone = null;
+            if (!string.IsNullOrWhiteSpace(task.RecurrenceRule) && (task.Start is not null || task.HasDueTime))
+            {
+                zone = TimeZoneInfo.TryConvertWindowsIdToIanaId(TimeZoneInfo.Local.Id, out var iana)
+                    ? iana : TimeZoneInfo.Local.Id;
+                if (!calendar.TimeZones.Any(timeZone => timeZone.TzId == zone)) calendar.AddTimeZone(zone);
+            }
+            todo.DtStart = ToCalDateTime(task.Start, task.Start is not null, zone);
+            todo.Due = ToCalDateTime(task.Due, task.HasDueTime, zone);
+        }
         todo.Priority = ToRfcPriority(task.Priority);
         todo.DtStamp = CalDateTime.UtcNow;
         todo.LastModified = CalDateTime.UtcNow;
@@ -118,10 +136,10 @@ public sealed class ICalendarCodec
 
     public void ValidateRecurrence(string recurrence)
     {
-        foreach (var rule in recurrence.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            _ = new RecurrenceRule(rule);
-        }
+        if (string.IsNullOrWhiteSpace(recurrence)) return;
+        if (recurrence.Contains('\r') || recurrence.Contains('\n'))
+            throw new FormatException("仅支持一条 RRULE，请在一行内填写");
+        _ = new RecurrenceRule(recurrence.Trim());
     }
 
     public RecurrenceCompletion CompleteOccurrence(TodoItem task, DateTimeOffset completedAt)
@@ -134,7 +152,9 @@ public sealed class ICalendarCodec
         var calendar = IcalCalendar.Load(task.RawICalendar) ?? throw new FormatException("Unable to parse recurring task.");
         var master = calendar.Todos.FirstOrDefault(candidate => candidate.RecurrenceIdentifier is null)
                      ?? throw new FormatException("Recurring task has no master VTODO.");
-        var occurrenceStart = ToCalDateTime(task.Start ?? task.Due, task.HasDueTime || task.Start is not null)
+        var anchor = master.DtStart ?? master.Due;
+        var occurrenceStart = anchor is null ? null : ToOccurrenceDateTime(task.Start ?? task.Due, anchor);
+        occurrenceStart = occurrenceStart
                               ?? master.DtStart
                               ?? master.Due
                               ?? throw new InvalidOperationException("Recurring task requires DTSTART or DUE.");
@@ -144,8 +164,8 @@ public sealed class ICalendarCodec
         exception.RecurrenceIdentifier = new RecurrenceIdentifier(occurrenceStart, null);
         exception.Summary = master.Summary;
         exception.Description = master.Description;
-        exception.DtStart = task.Start is null ? null : ToCalDateTime(task.Start, true);
-        exception.Due = ToCalDateTime(task.Due, task.HasDueTime);
+        exception.DtStart = master.DtStart is null ? null : ToOccurrenceDateTime(task.Start, master.DtStart);
+        exception.Due = master.Due is null ? null : ToOccurrenceDateTime(task.Due, master.Due);
         exception.Priority = master.Priority;
         exception.Status = "COMPLETED";
         exception.PercentComplete = 100;
@@ -174,10 +194,22 @@ public sealed class ICalendarCodec
 
     private static CalDateTime? FindNextOccurrence(IcalCalendar calendar, CalDateTime current)
     {
-        return calendar
-            .GetOccurrences<Todo>(current, new EvaluationOptions { MaxUnmatchedIncrementsLimit = 10000 })
-            .Select(occurrence => occurrence.Period.StartTime)
-            .FirstOrDefault(candidate => candidate > current);
+        var master = calendar.Todos.FirstOrDefault(todo => todo.RecurrenceIdentifier is null);
+        var start = master?.DtStart;
+        // Ical.Net evaluates VTODO from DTSTART; due-only tasks use DUE as an
+        // evaluation anchor without adding a start date to the stored resource.
+        if (master is not null && start is null) master.DtStart = master.Due;
+        try
+        {
+            return calendar
+                .GetOccurrences<Todo>(current, new EvaluationOptions { MaxUnmatchedIncrementsLimit = 10000 })
+                .Select(occurrence => occurrence.Period.StartTime)
+                .FirstOrDefault(candidate => candidate > current);
+        }
+        finally
+        {
+            if (master is not null) master.DtStart = start;
+        }
     }
 
     private static DateTime? ShiftDue(Todo master, CalDateTime nextStart, out bool hasDueTime)
@@ -202,12 +234,22 @@ public sealed class ICalendarCodec
         return DateTime.SpecifyKind(value.Value, DateTimeKind.Unspecified);
     }
 
-    private static CalDateTime? ToCalDateTime(DateTime? value, bool hasTime)
+    private static CalDateTime? ToOccurrenceDateTime(DateTime? value, CalDateTime anchor)
+    {
+        if (value is null) return null;
+        if (!anchor.HasTime) return new CalDateTime(DateOnly.FromDateTime(value.Value));
+        if (!anchor.IsUtc && string.IsNullOrWhiteSpace(anchor.TzId))
+            return new CalDateTime(DateTime.SpecifyKind(value.Value, DateTimeKind.Unspecified), true);
+        return ToCalDateTime(value, true, anchor.TzId);
+    }
+
+    private static CalDateTime? ToCalDateTime(DateTime? value, bool hasTime, string? zone = null)
     {
         if (value is null) return null;
         if (!hasTime) return new CalDateTime(DateOnly.FromDateTime(value.Value));
         var local = DateTime.SpecifyKind(value.Value, DateTimeKind.Local);
-        return new CalDateTime(local.ToUniversalTime(), true);
+        var utc = new CalDateTime(local.ToUniversalTime(), true);
+        return string.IsNullOrWhiteSpace(zone) ? utc : utc.ToTimeZone(zone);
     }
 
     private static TodoPriority FromRfcPriority(int priority) => priority switch
