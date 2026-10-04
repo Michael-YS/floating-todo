@@ -19,7 +19,7 @@
         </Grid.ColumnDefinitions>
         <StackPanel>
           <TextBlock Text="编辑任务" FontSize="21" FontWeight="SemiBold" />
-          <TextBlock Text="关闭窗口后同步到 CalDAV" Foreground="{StaticResource SecondaryText}" FontSize="12" Margin="0,4,0,0" />
+          <TextBlock Text="修改后关闭自动保存，CalDAV 任务同步到服务器" Foreground="{StaticResource SecondaryText}" FontSize="12" Margin="0,4,0,0" />
         </StackPanel>
         <Button Grid.Column="1" Content="✕" Style="{StaticResource IconButton}" FontSize="15" Click="Close_Click" />
       </Grid>

@@ -1,10 +1,111 @@
 using FloatingTodo;
+using System.IO;
 
 var failures = new List<string>();
 void Check(bool condition, string message)
 {
     if (!condition) failures.Add(message);
 }
+
+var editorChecks = new Thread(() =>
+{
+    try
+    {
+        var app = new App();
+        app.InitializeComponent();
+        var item = new TodoItem
+        {
+            Title = "Editor check", ListId = "one", Description = "Notes",
+            Start = new DateTime(2026, 10, 4, 9, 30, 15),
+            Due = new DateTime(2026, 10, 4, 17, 0, 25), HasDueTime = true,
+            Priority = TodoPriority.Medium, RecurrenceRule = "FREQ=DAILY"
+        };
+        TodoListInfo[] lists =
+        [
+            new() { Id = "one", Name = "One", Color = "#55C9B0", IsLocal = true },
+            new() { Id = "two", Name = "Two", Color = "#55C9B0", IsLocal = true }
+        ];
+        T Control<T>(EditorWindow editor, string name) => (T)editor.FindName(name);
+        void CheckClose(string scenario, Action<EditorWindow> edit, bool shouldSave)
+        {
+            var editor = new EditorWindow(item, lists);
+            var saves = 0;
+            editor.TaskSaved += _ => saves++;
+            edit(editor);
+            editor.Close();
+            Check(saves == (shouldSave ? 1 : 0), $"editor close: {scenario}");
+        }
+
+        CheckClose("unchanged times containing seconds", _ => { }, false);
+        CheckClose("title restored", editor =>
+        {
+            var title = Control<System.Windows.Controls.TextBox>(editor, "TitleBox");
+            title.Text = "Changed";
+            title.Text = item.Title;
+        }, false);
+        CheckClose("trimmed whitespace", editor =>
+        {
+            Control<System.Windows.Controls.TextBox>(editor, "TitleBox").Text = " Editor check ";
+            Control<System.Windows.Controls.TextBox>(editor, "StartTimeBox").Text = " 09:30 ";
+            Control<System.Windows.Controls.TextBox>(editor, "RecurrenceBox").Text = " FREQ=DAILY ";
+        }, false);
+        CheckClose("sync metadata changed while open", _ => item.ETag = "new-etag", false);
+
+        foreach (var (name, value) in new[]
+        {
+            ("TitleBox", "Changed"), ("DescriptionBox", "Changed notes"),
+            ("StartTimeBox", "10:00"), ("DueTimeBox", "18:00"),
+            ("RecurrenceBox", "FREQ=WEEKLY")
+        })
+        {
+            CheckClose(name, editor => Control<System.Windows.Controls.TextBox>(editor, name).Text = value, true);
+        }
+        CheckClose("list", editor => Control<System.Windows.Controls.ComboBox>(editor, "ListBox").SelectedValue = "two", true);
+        CheckClose("priority", editor => Control<System.Windows.Controls.ComboBox>(editor, "PriorityBox").SelectedValue = TodoPriority.High, true);
+        CheckClose("start date", editor => Control<System.Windows.Controls.DatePicker>(editor, "StartDatePicker").SelectedDate = item.Start!.Value.AddDays(-1).Date, true);
+        CheckClose("due date", editor => Control<System.Windows.Controls.DatePicker>(editor, "DueDatePicker").SelectedDate = item.Due!.Value.AddDays(1).Date, true);
+        CheckClose("clear due date", editor => Control<System.Windows.Controls.DatePicker>(editor, "DueDatePicker").SelectedDate = null, true);
+
+        var discard = new EditorWindow(item, lists);
+        var discardSaves = 0;
+        discard.TaskSaved += _ => discardSaves++;
+        Control<System.Windows.Controls.TextBox>(discard, "TitleBox").Text = "Discard me";
+        var editorGrid = (System.Windows.Controls.Grid)((System.Windows.Controls.Border)discard.Content).Child;
+        var footer = (System.Windows.Controls.Grid)editorGrid.Children[2];
+        ((System.Windows.Controls.Button)footer.Children[2]).RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        Check(discardSaves == 0, "discarded edit was saved");
+
+        var delete = new EditorWindow(item, lists);
+        var deleteSaves = 0;
+        var deletes = 0;
+        delete.TaskSaved += _ => deleteSaves++;
+        delete.TaskDeleted += id => { if (id == item.Id) deletes++; };
+        var deleteButton = Control<System.Windows.Controls.Button>(delete, "DeleteButton");
+        deleteButton.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        Check(deletes == 0, "task deleted before confirmation");
+        deleteButton.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        Check(deletes == 1 && deleteSaves == 0, "confirmed deletion did not bypass save");
+
+        var invalid = new EditorWindow(item, lists);
+        var invalidSaves = 0;
+        invalid.TaskSaved += _ => invalidSaves++;
+        Control<System.Windows.Controls.TextBox>(invalid, "TitleBox").Text = "";
+        invalid.Close();
+        Check(invalidSaves == 0 && Control<System.Windows.Controls.TextBlock>(invalid, "ValidationText").Text == "标题不能为空",
+            "invalid edit was saved or did not show validation");
+        Control<System.Windows.Controls.TextBox>(invalid, "TitleBox").Text = "Valid change";
+        invalid.Close();
+        Check(invalidSaves == 1, "valid edit after failed close was not saved");
+        app.Shutdown();
+    }
+    catch (Exception exception)
+    {
+        failures.Add($"editor checks failed: {exception}");
+    }
+});
+editorChecks.SetApartmentState(ApartmentState.STA);
+editorChecks.Start();
+editorChecks.Join();
 
 var root = Path.Combine(Path.GetTempPath(), "FloatingTodo-CoreChecks");
 Directory.CreateDirectory(root);
@@ -188,5 +289,5 @@ if (failures.Count > 0)
     return 1;
 }
 
-Console.WriteLine("Core checks passed: sync alerts, SQLite, outbox, iCalendar, RRULE, Credential Manager");
+Console.WriteLine("Core checks passed: editor change detection, sync alerts, SQLite, outbox, iCalendar, RRULE, Credential Manager");
 return 0;
