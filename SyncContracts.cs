@@ -37,7 +37,43 @@ public enum SyncState
     Error
 }
 
-public sealed record SyncStatus(SyncState State, string Message, DateTimeOffset ChangedAt);
+public sealed record SyncStatus(SyncState State, string Message, DateTimeOffset ChangedAt)
+{
+    // Idle is also emitted on cancellation; only a completed pass clears an alert.
+    internal bool CompletedSuccessfully { get; init; }
+}
+
+internal sealed class SyncAlertState
+{
+    internal SyncState State { get; private set; } = SyncState.Idle;
+    internal string Message { get; private set; } = "本地";
+    internal string? ErrorMessage { get; private set; }
+    internal bool IsSynchronizing => State == SyncState.Synchronizing;
+
+    internal bool Apply(SyncStatus status)
+    {
+        State = status.State;
+        Message = status.Message;
+        if (status.CompletedSuccessfully)
+        {
+            ErrorMessage = null;
+        }
+        if (status.State != SyncState.Error)
+        {
+            return false;
+        }
+        var notify = ErrorMessage is null;
+        ErrorMessage = status.Message;
+        return notify;
+    }
+
+    internal void Reset()
+    {
+        State = SyncState.Idle;
+        Message = "本地";
+        ErrorMessage = null;
+    }
+}
 
 public sealed record SyncResult(
     int Downloaded,

@@ -32,6 +32,9 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _completionTimer;
     private readonly DispatcherTimer _scheduledSyncTimer;
     private readonly Forms.NotifyIcon _trayIcon;
+    private readonly DrawingIcon _normalTrayIcon;
+    private readonly DrawingIcon _errorTrayIcon;
+    private readonly SyncAlertState _syncAlert = new();
     private readonly Dictionary<Guid, TextBlock> _completionCountdowns = new();
     private DateTimeOffset? _temporaryUntil;
     private bool _hovering;
@@ -64,14 +67,19 @@ public partial class MainWindow : Window
         _scheduledSyncTimer.Tick += ScheduledSyncTimer_Tick;
         _scheduledSyncTimer.Start();
 
+        _normalTrayIcon = LoadApplicationIcon();
+        _errorTrayIcon = CreateErrorIcon(_normalTrayIcon);
         _trayIcon = new Forms.NotifyIcon
         {
-            Icon = LoadApplicationIcon(),
+            Icon = _normalTrayIcon,
             Text = "Floating Todo",
             Visible = true,
             ContextMenuStrip = BuildTrayMenu()
         };
         _trayIcon.MouseClick += TrayIcon_MouseClick;
+        _trayIcon.BalloonTipClicked += (_, _) => Dispatcher.Invoke(ShowTemporarily);
+        SyncErrorPanel.SizeChanged += (_, _) => UpdateWorkingArea();
+        NewTaskPanel.SizeChanged += (_, _) => UpdateWorkingArea();
         NetworkChange.NetworkAvailabilityChanged += NetworkAvailabilityChanged;
         SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
 
@@ -85,9 +93,36 @@ public partial class MainWindow : Window
     {
         var processPath = Environment.ProcessPath;
         return string.IsNullOrWhiteSpace(processPath)
-            ? DrawingSystemIcons.Application
-            : DrawingIcon.ExtractAssociatedIcon(processPath) ?? DrawingSystemIcons.Application;
+            ? (DrawingIcon)DrawingSystemIcons.Application.Clone()
+            : DrawingIcon.ExtractAssociatedIcon(processPath) ?? (DrawingIcon)DrawingSystemIcons.Application.Clone();
     }
+
+    private static DrawingIcon CreateErrorIcon(DrawingIcon original)
+    {
+        using var bitmap = new System.Drawing.Bitmap(32, 32);
+        using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
+        {
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            graphics.DrawIcon(original, new System.Drawing.Rectangle(0, 0, 32, 32));
+            using var badge = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(230, 50, 55));
+            graphics.FillEllipse(badge, 14, 14, 18, 18);
+            graphics.FillRectangle(System.Drawing.Brushes.White, 22, 17, 3, 8);
+            graphics.FillEllipse(System.Drawing.Brushes.White, 22, 27, 3, 3);
+        }
+        var handle = bitmap.GetHicon();
+        try
+        {
+            using var icon = DrawingIcon.FromHandle(handle);
+            return (DrawingIcon)icon.Clone();
+        }
+        finally
+        {
+            DestroyIcon(handle);
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool DestroyIcon(nint handle);
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
@@ -537,14 +572,12 @@ public partial class MainWindow : Window
         editor.TaskSaved += draft =>
         {
             _store.Upsert(draft);
-            SyncText.Text = "等待同步";
             RefreshTasks();
             _ = SynchronizeAsync(SyncTrigger.LocalChange);
         };
         editor.TaskDeleted += id =>
         {
             _store.Delete(id);
-            SyncText.Text = "等待同步";
             RefreshTasks();
             _ = SynchronizeAsync(SyncTrigger.LocalChange);
         };
@@ -636,7 +669,9 @@ public partial class MainWindow : Window
         var dpi = VisualTreeHelper.GetDpi(this).DpiScaleY;
         var workHeight = screen.WorkingArea.Height / Math.Max(1d, dpi);
         MaxHeight = Math.Max(260, workHeight - 36);
-        TaskScroll.MaxHeight = Math.Max(120, MaxHeight - 100 - (NewTaskPanel.Visibility == Visibility.Visible ? 58 : 0));
+        TaskScroll.MaxHeight = Math.Max(40, MaxHeight - 100
+            - (NewTaskPanel.Visibility == Visibility.Visible ? 58 : 0)
+            - (SyncErrorPanel.Visibility == Visibility.Visible ? SyncErrorPanel.ActualHeight + 12 : 0));
     }
 
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -650,6 +685,11 @@ public partial class MainWindow : Window
 
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
+        _normalTrayIcon.Dispose();
+        _errorTrayIcon.Dispose();
+        _syncEngine.StatusChanged -= SyncEngine_StatusChanged;
+        _syncEngine.DataChanged -= SyncEngine_DataChanged;
+        _scheduledSyncTimer.Stop();
         NetworkChange.NetworkAvailabilityChanged -= NetworkAvailabilityChanged;
         SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
     }
@@ -680,6 +720,8 @@ public partial class MainWindow : Window
     {
         if (!_database.GetAccounts().Any(account => account.Enabled))
         {
+            _syncAlert.Reset();
+            RenderSyncStatus();
             return;
         }
 
@@ -714,23 +756,66 @@ public partial class MainWindow : Window
     {
         Dispatcher.Invoke(() =>
         {
-            SyncText.Text = status.State switch
+            if (_allowExit) return;
+            if (!_database.GetAccounts().Any(account => account.Enabled))
             {
-                SyncState.Synchronizing => "同步中",
-                SyncState.WaitingToUpload => "等待同步",
-                SyncState.Conflict => "有冲突",
-                SyncState.Error => "同步错误",
-                SyncState.Offline => "离线",
-                _ => "刚刚同步"
-            };
-            SyncText.ToolTip = status.Message;
+                _syncAlert.Reset();
+                RenderSyncStatus();
+                return;
+            }
+            var notify = _syncAlert.Apply(status);
+            RenderSyncStatus();
+            if (notify)
+            {
+                _trayIcon.ShowBalloonTip(5000, "Floating Todo · 同步失败",
+                    "请点击查看错误原因并重试。", Forms.ToolTipIcon.Error);
+            }
         });
+    }
+
+    private void RenderSyncStatus()
+    {
+        var error = _syncAlert.ErrorMessage is not null;
+        var color = error ? "#FF8A86" : _syncAlert.State switch
+        {
+            SyncState.Conflict => "#FFB454",
+            SyncState.Synchronizing or SyncState.WaitingToUpload => "#6FA8FF",
+            SyncState.Offline => "#AAAAAA",
+            _ => "#55C9B0"
+        };
+        SyncDot.Fill = BrushFromHex(color);
+        SyncText.Foreground = error || _syncAlert.State == SyncState.Conflict
+            ? BrushFromHex(color) : (System.Windows.Media.Brush)FindResource("SecondaryText");
+        SyncText.FontWeight = error ? FontWeights.Bold : FontWeights.Normal;
+        SyncText.Text = error ? "同步错误" : _syncAlert.State switch
+        {
+            SyncState.Synchronizing => "同步中",
+            SyncState.WaitingToUpload => "等待同步",
+            SyncState.Conflict => "有冲突",
+            SyncState.Offline => "离线",
+            _ => _syncAlert.Message
+        };
+        SyncDot.ToolTip = SyncText.ToolTip = _syncAlert.ErrorMessage ?? _syncAlert.Message;
+        SyncErrorText.Text = _syncAlert.ErrorMessage ?? string.Empty;
+        SyncErrorPanel.Visibility = error ? Visibility.Visible : Visibility.Collapsed;
+        RetrySyncButton.IsEnabled = !_syncAlert.IsSynchronizing;
+        RetrySyncButton.Opacity = _syncAlert.IsSynchronizing ? 0.6 : 1;
+        RetrySyncButton.Content = _syncAlert.IsSynchronizing ? "重试中" : "重试";
+        _trayIcon.Icon = error ? _errorTrayIcon : _normalTrayIcon;
+        _trayIcon.Text = error ? "Floating Todo · 同步失败" : "Floating Todo";
+        UpdateWorkingArea();
+    }
+
+    private async void RetrySyncButton_Click(object sender, RoutedEventArgs e)
+    {
+        await SynchronizeAsync(SyncTrigger.TrayRequest);
     }
 
     private void SyncEngine_DataChanged()
     {
         Dispatcher.Invoke(() =>
         {
+            if (_allowExit) return;
             _store.Reload();
             _newListIndex = Math.Clamp(_newListIndex, 0, Math.Max(0, _store.Lists.Count - 1));
             if (_store.Lists.Count > 0)

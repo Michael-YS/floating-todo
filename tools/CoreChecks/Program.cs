@@ -12,6 +12,26 @@ var databasePath = Path.Combine(root, $"checks-{Guid.NewGuid():N}.db");
 
 try
 {
+    var alert = new SyncAlertState();
+    SyncStatus Status(SyncState state, string message, bool success = false) =>
+        new(state, message, DateTimeOffset.Now) { CompletedSuccessfully = success };
+    Check(alert.Apply(Status(SyncState.Error, "first failure")), "first sync failure did not request notification");
+    Check(!alert.Apply(Status(SyncState.Error, "different failure")) && alert.ErrorMessage == "different failure",
+        "continuous failure notified again or did not update details");
+    Check(!alert.Apply(Status(SyncState.Synchronizing, "retry")) && alert.IsSynchronizing && alert.ErrorMessage is not null,
+        "retry cleared sync error or did not disable retry");
+    alert.Apply(Status(SyncState.Idle, "cancelled"));
+    Check(alert.ErrorMessage is not null && !alert.IsSynchronizing, "cancelled sync cleared error or left retry disabled");
+    alert.Apply(Status(SyncState.Idle, "success", success: true));
+    Check(alert.ErrorMessage is null, "successful sync did not clear error");
+    Check(alert.Apply(Status(SyncState.Error, "new failure")), "new failure after recovery did not notify");
+    alert.Apply(Status(SyncState.Conflict, "conflicts", success: true));
+    Check(alert.ErrorMessage is null && alert.State == SyncState.Conflict, "successful sync with conflicts retained error");
+    alert.Apply(Status(SyncState.Error, "disabled"));
+    alert.Reset();
+    Check(alert.ErrorMessage is null && alert.Message == "本地" && !alert.IsSynchronizing, "disabling sync did not reset alerts");
+    Check(alert.Apply(Status(SyncState.Error, "re-enabled")), "re-enabled sync failure did not notify");
+
     var codec = new ICalendarCodec();
     var database = new AppDatabase(databasePath);
     database.UpsertAccount(new AccountRecord("test", "Test", "https://example.invalid/", "tester", true));
@@ -168,5 +188,5 @@ if (failures.Count > 0)
     return 1;
 }
 
-Console.WriteLine("Core checks passed: SQLite, outbox, iCalendar, RRULE, Credential Manager");
+Console.WriteLine("Core checks passed: sync alerts, SQLite, outbox, iCalendar, RRULE, Credential Manager");
 return 0;
