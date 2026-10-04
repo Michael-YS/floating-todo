@@ -13,6 +13,7 @@ public partial class EditorWindow : Window
     private readonly TodoItem _original;
     private readonly TodoItem _draft;
     private readonly ComboBox _recurrencePresetBox;
+    private readonly EditorValues _initialValues;
     private bool _discarded;
     private bool _deleted;
     private bool _deleteArmed;
@@ -57,6 +58,7 @@ public partial class EditorWindow : Window
         _recurrencePresetBox.SelectedValue = RecurrenceChoices.Exists(choice => choice.Rule == _draft.RecurrenceRule)
             ? _draft.RecurrenceRule
             : CustomRecurrence;
+        _initialValues = ReadEditorValues();
     }
 
     public event Action<TodoItem>? TaskSaved;
@@ -114,7 +116,7 @@ public partial class EditorWindow : Window
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
-        if (!_discarded && !_deleted)
+        if (!_discarded && !_deleted && ReadEditorValues() != _initialValues)
         {
             if (!TryBuildDraft(out var error))
             {
@@ -128,6 +130,20 @@ public partial class EditorWindow : Window
 
         base.OnClosing(e);
     }
+
+    private EditorValues ReadEditorValues() => new(
+        TitleBox.Text.Trim(), ListBox.SelectedValue as string,
+        StartDatePicker.SelectedDate, StartTimeBox.Text.Trim(),
+        DueDatePicker.SelectedDate, DueTimeBox.Text.Trim(),
+        PriorityBox.SelectedValue is TodoPriority priority ? priority : TodoPriority.None,
+        DescriptionBox.Text, RecurrenceBox.Text.Trim());
+
+    // Compare the values displayed at open, since the time inputs omit seconds
+    // and the task's sync metadata may change while the editor is open.
+    private sealed record EditorValues(
+        string Title, string? ListId, DateTime? StartDate, string StartTime,
+        DateTime? DueDate, string DueTime, TodoPriority Priority,
+        string Description, string RecurrenceRule);
 
     private bool TryBuildDraft(out string error)
     {
