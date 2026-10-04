@@ -6,8 +6,6 @@ internal static class EditorChecks
 {
     public static void Run(Action<bool, string> check)
     {
-        var app = new App();
-        app.InitializeComponent();
         T Control<T>(EditorWindow editor, string name) where T : FrameworkElement => (T)editor.FindName(name);
         TodoItem Task(string rule) => new() { Title = "Editor recurrence", Due = new DateTime(2026, 10, 26), RecurrenceRule = rule };
         var lists = new[] { new TodoListInfo { Id = "personal", Name = "Local", Color = "#FFFFFF", IsLocal = true } };
@@ -29,7 +27,23 @@ internal static class EditorChecks
         saved = null;
         rawEditor.TaskSaved += task => saved = task;
         rawEditor.Close();
-        check(saved?.RecurrenceRule == complex, "editor changed unsupported existing RRULE");
+        check(saved is null, "unchanged complex RRULE triggered a save");
+        rawEditor = new EditorWindow(Task(complex), lists);
+        Control<TextBox>(rawEditor, "TitleBox").Text = "Changed title";
+        rawEditor.TaskSaved += task => saved = task;
+        rawEditor.Close();
+        check(saved?.RecurrenceRule == complex, "title edit changed unsupported existing RRULE");
+
+        foreach (var scenario in new[] { "unchanged", "changed", "restored" })
+        {
+            var visualEditor = new EditorWindow(Task("FREQ=MONTHLY;BYDAY=MO;BYSETPOS=-1;COUNT=3"), lists);
+            var saves = 0;
+            visualEditor.TaskSaved += _ => saves++;
+            if (scenario != "unchanged") Control<TextBox>(visualEditor, "CountBox").Text = "4";
+            if (scenario == "restored") Control<TextBox>(visualEditor, "CountBox").Text = "3";
+            visualEditor.Close();
+            check(saves == (scenario == "changed" ? 1 : 0), "visual configuration change detection: " + scenario);
+        }
 
         var invalidEditor = new EditorWindow(Task("FREQ=WEEKLY;INTERVAL=2"), lists);
         Control<TextBox>(invalidEditor, "IntervalBox").Text = "0";
@@ -43,6 +57,5 @@ internal static class EditorChecks
         Control<TextBox>(invalidEditor, "IntervalBox").Text = "3";
         invalidEditor.Close();
         check(saved?.RecurrenceRule == "FREQ=WEEKLY;INTERVAL=3", "corrected visual configuration did not save");
-        app.Shutdown();
     }
 }

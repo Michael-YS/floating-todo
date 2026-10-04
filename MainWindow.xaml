@@ -13,6 +13,7 @@
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto" />
         <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
         <RowDefinition Height="*" />
       </Grid.RowDefinitions>
 
@@ -24,7 +25,7 @@
         </Grid.ColumnDefinitions>
         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
           <TextBlock Text="TODO" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
-          <Ellipse Width="7" Height="7" Fill="#55C9B0" Margin="10,1,0,0" ToolTip="本地原型 · 等待接入 CalDAV" />
+          <Ellipse x:Name="SyncDot" Width="8" Height="8" Fill="#55C9B0" Margin="10,1,0,0" ToolTip="本地" />
         </StackPanel>
         <TextBlock Grid.Column="1" x:Name="SyncText" Text="本地" Foreground="{StaticResource SecondaryText}"
                    FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0" />
@@ -32,7 +33,23 @@
                 Padding="5,0" ToolTip="新建任务" Click="AddButton_Click" />
       </Grid>
 
-      <Border Grid.Row="1" x:Name="NewTaskPanel" Visibility="Collapsed" Background="#28000000"
+      <Border Grid.Row="1" x:Name="SyncErrorPanel" Visibility="Collapsed" Background="#38FF5555"
+              BorderBrush="#FF8A86" BorderThickness="1" CornerRadius="10" Padding="10" Margin="0,0,0,12">
+        <StackPanel>
+          <DockPanel Margin="0,0,0,6">
+            <Button x:Name="RetrySyncButton" DockPanel.Dock="Right" Content="重试" Padding="10,4"
+                    Style="{StaticResource IconButton}" Background="#30FFFFFF"
+                    MinWidth="64" MinHeight="28" FontSize="12"
+                    Click="RetrySyncButton_Click" AutomationProperties.Name="重试同步" />
+            <TextBlock Text="⚠ 同步失败" Foreground="#FF8A86" FontWeight="Bold" FontSize="13" VerticalAlignment="Center" />
+          </DockPanel>
+          <ScrollViewer MaxHeight="96" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <TextBlock x:Name="SyncErrorText" TextWrapping="Wrap" Foreground="{StaticResource PrimaryText}" FontSize="12" />
+          </ScrollViewer>
+        </StackPanel>
+      </Border>
+
+      <Border Grid.Row="2" x:Name="NewTaskPanel" Visibility="Collapsed" Background="#28000000"
               BorderBrush="#36FFFFFF" BorderThickness="1" CornerRadius="10" Padding="8" Margin="0,0,0,12">
         <Grid>
           <Grid.ColumnDefinitions>
@@ -76,7 +93,7 @@
         </Border>
       </Popup>
 
-      <ScrollViewer Grid.Row="2" x:Name="TaskScroll" VerticalScrollBarVisibility="Auto"
+      <ScrollViewer Grid.Row="3" x:Name="TaskScroll" VerticalScrollBarVisibility="Auto"
                     HorizontalScrollBarVisibility="Disabled" MaxHeight="780">
         <StackPanel x:Name="GroupsPanel" />
       </ScrollViewer>

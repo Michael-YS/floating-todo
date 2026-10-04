@@ -66,7 +66,7 @@ public sealed class CalDavSyncEngine : ICalDavSyncEngine
             var conflicts = _database.GetConflicts().Select(ToTaskConflict).ToList();
             SetStatus(
                 conflicts.Count > 0 ? SyncState.Conflict : SyncState.Idle,
-                conflicts.Count > 0 ? $"{conflicts.Count} 个冲突待处理" : "刚刚同步");
+                conflicts.Count > 0 ? $"{conflicts.Count} 个冲突待处理" : "刚刚同步", completedSuccessfully: true);
             DataChanged?.Invoke();
             return new SyncResult(downloaded, uploaded, conflicts, DateTimeOffset.Now);
         }
@@ -195,8 +195,11 @@ public sealed class CalDavSyncEngine : ICalDavSyncEngine
         return downloaded;
     }
 
-    private void SetStatus(SyncState state, string message) =>
-        StatusChanged?.Invoke(new SyncStatus(state, message, DateTimeOffset.Now));
+    private void SetStatus(SyncState state, string message, bool completedSuccessfully = false) =>
+        StatusChanged?.Invoke(new SyncStatus(state, message, DateTimeOffset.Now)
+        {
+            CompletedSuccessfully = completedSuccessfully
+        });
 
     private static string BuildTaskUrl(string calendarUrl, string uid)
     {
