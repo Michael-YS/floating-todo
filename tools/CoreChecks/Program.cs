@@ -7,6 +7,31 @@ void Check(bool condition, string message)
     if (!condition) failures.Add(message);
 }
 
+var groupingNow = new DateTime(2026, 10, 30, 18, 0, 0);
+Check(BackgroundSchedule.RefreshInterval(false) == TimeSpan.FromMinutes(1) &&
+      BackgroundSchedule.RefreshInterval(true) == TimeSpan.FromMinutes(5) &&
+      BackgroundSchedule.CountdownInterval(false) == TimeSpan.FromSeconds(1) &&
+      BackgroundSchedule.CountdownInterval(true) == TimeSpan.FromSeconds(5) &&
+      BackgroundSchedule.SyncInterval(false, true) == TimeSpan.FromMinutes(1) &&
+      BackgroundSchedule.SyncInterval(false, false) == TimeSpan.FromMinutes(5) &&
+      BackgroundSchedule.SyncInterval(true, true) == TimeSpan.FromMinutes(15) &&
+      BackgroundSchedule.SyncInterval(true, false) == TimeSpan.FromMinutes(15),
+    "background schedule did not match power-saving mode");
+var timedDue = new TodoItem { Due = groupingNow.Date.AddHours(14), HasDueTime = true };
+var todayDue = new TodoItem { Due = groupingNow.Date };
+Check(MainWindow.GroupKey(timedDue, groupingNow) == "逾期" && MainWindow.GroupOrder(timedDue, groupingNow) == int.MinValue,
+    "timed task earlier today was not ordered as overdue");
+Check(MainWindow.GroupKey(timedDue, timedDue.Due!.Value) == "今天", "timed task was overdue at its exact deadline");
+Check(MainWindow.GroupKey(timedDue, groupingNow.Date.AddHours(13)) == "今天", "future timed task was overdue");
+Check(MainWindow.GroupKey(todayDue, groupingNow) == "今天", "date-only task was overdue during its due date");
+Check(MainWindow.GroupKey(todayDue, groupingNow.Date.AddDays(1)) == "逾期", "date-only task was not overdue the next day");
+Check(MainWindow.GroupKey(new TodoItem(), groupingNow) == "无日期" && MainWindow.GroupOrder(new TodoItem(), groupingNow) == int.MaxValue,
+    "task without a due date was not ordered last");
+Check(MainWindow.GroupKey(new TodoItem { Due = groupingNow.Date.AddDays(-1) }, groupingNow) == "逾期",
+    "date-only task due yesterday was not overdue");
+Check(MainWindow.GroupKey(new TodoItem { Due = groupingNow.Date.AddDays(1).AddHours(9), HasDueTime = true }, groupingNow) == "明天",
+    "timed task due tomorrow was not grouped as tomorrow");
+
 var editorChecks = new Thread(() =>
 {
     try
@@ -293,6 +318,11 @@ try
     var cleanedLocalTask = reopened.LoadTasks().Single(item => item.Id == localTask.Id);
     Check(!cleanedLocalTask.IsDirty, "legacy local task remained dirty");
     Check(reopened.GetPendingChanges().Count == 1, "local outbox cleanup removed a remote change");
+    Check(!reopened.GetPowerSavingEnabled(), "power saving was not disabled by default");
+    reopened.SetPowerSavingEnabled(true);
+    Check(new AppDatabase(databasePath).GetPowerSavingEnabled(), "power saving was not persisted as enabled");
+    reopened.SetPowerSavingEnabled(false);
+    Check(!new AppDatabase(databasePath).GetPowerSavingEnabled(), "power saving was not persisted as disabled");
     Check(reopened.GetHudOpacityPercent() == 100, "default HUD opacity was not 100 percent");
     reopened.SetHudOpacityPercent(63);
     Check(new AppDatabase(databasePath).GetHudOpacityPercent() == 63, "HUD opacity was not persisted");

@@ -42,11 +42,22 @@ public partial class SettingsWindow : Window
         Closed += (_, _) => _connectionStatusTimer.Stop();
         RefreshStartupSetting();
         InitializeOpacitySetting();
+        PowerSavingCheckBox.IsChecked = _database.GetPowerSavingEnabled();
+        PowerSavingCheckBox.Checked += PowerSaving_Changed;
+        PowerSavingCheckBox.Unchecked += PowerSaving_Changed;
         RefreshPanels();
     }
 
     public event Action? ConfigurationChanged;
     public event Action<int>? HudOpacityChanged;
+    public event Action<bool>? PowerSavingChanged;
+
+    private void PowerSaving_Changed(object sender, RoutedEventArgs e)
+    {
+        var enabled = PowerSavingCheckBox.IsChecked == true;
+        _database.SetPowerSavingEnabled(enabled);
+        PowerSavingChanged?.Invoke(enabled);
+    }
 
     private void InitializeOpacitySetting()
     {
