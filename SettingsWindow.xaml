@@ -43,6 +43,12 @@
 
               <Border Height="1" Background="#24FFFFFF" Margin="0,16,0,14" />
 
+              <CheckBox x:Name="PowerSavingCheckBox" Content="省电模式"
+                        Foreground="{StaticResource PrimaryText}" FontSize="14" />
+              <TextBlock Text="同步约 15–20 分钟，任务分组每 5 分钟，撤销倒计时每 5 秒刷新。" Foreground="{StaticResource SecondaryText}"
+                         FontSize="11" Margin="24,6,0,0" />
+              <Border Height="1" Background="#24FFFFFF" Margin="0,16,0,14" />
+
               <TextBlock Text="HUD 透明度"
                          Foreground="{StaticResource PrimaryText}"
                          FontSize="14" />

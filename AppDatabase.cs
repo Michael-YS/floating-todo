@@ -78,6 +78,30 @@ public sealed class AppDatabase
         }
     }
 
+    public bool GetPowerSavingEnabled()
+    {
+        lock (_gate)
+        {
+            using var connection = Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT value FROM app_settings WHERE key = 'power_saving_enabled'";
+            return (command.ExecuteScalar() as string) == "1";
+        }
+    }
+
+    public void SetPowerSavingEnabled(bool enabled)
+    {
+        lock (_gate)
+        {
+            using var connection = Open();
+            Execute(connection, """
+                INSERT INTO app_settings (key, value)
+                VALUES ('power_saving_enabled', $value)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """, ("$value", enabled ? "1" : "0"));
+        }
+    }
+
     public void UpsertAccount(AccountRecord account)
     {
         lock (_gate)

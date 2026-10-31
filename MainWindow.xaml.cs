@@ -43,7 +43,9 @@ public partial class MainWindow : Window
     private bool _allowExit;
     private int _newListIndex;
     private DateTime? _newDue = DateTime.Today;
+    private DateTime _lastTaskRefreshTime;
     private DateTimeOffset _lastSyncAttempt = DateTimeOffset.MinValue;
+    private bool _powerSaving;
 
     public MainWindow()
     {
@@ -65,6 +67,7 @@ public partial class MainWindow : Window
         _completionTimer.Tick += CompletionTimer_Tick;
         _scheduledSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
         _scheduledSyncTimer.Tick += ScheduledSyncTimer_Tick;
+        ApplyPowerSaving(_database.GetPowerSavingEnabled());
         _scheduledSyncTimer.Start();
 
         _normalTrayIcon = LoadApplicationIcon();
@@ -418,15 +421,17 @@ public partial class MainWindow : Window
     {
         GroupsPanel.Children.Clear();
         _completionCountdowns.Clear();
+        var now = DateTime.Now;
+        _lastTaskRefreshTime = now;
         var visibleItems = _store.Items
             .Where(_store.IsVisibleInHud)
-            .OrderBy(GroupOrder)
+            .OrderBy(item => GroupOrder(item, now))
             .ThenBy(PriorityOrder)
             .ThenBy(item => item.Due ?? DateTime.MaxValue)
             .ThenBy(item => item.Title, StringComparer.CurrentCulture)
             .ToList();
 
-        foreach (var group in visibleItems.GroupBy(GroupKey))
+        foreach (var group in visibleItems.GroupBy(item => GroupKey(item, now)))
         {
             AddGroup(group.Key, group.ToList());
         }
@@ -494,6 +499,11 @@ public partial class MainWindow : Window
         complete.Template = RoundButtonTemplate();
         complete.Click += (_, _) =>
         {
+            if (item.IsCompleted && _store.RemainingUndo(item) <= TimeSpan.Zero)
+            {
+                RefreshTasks();
+                return;
+            }
             _store.ToggleCompleted(item);
             RefreshTasks();
             _ = SynchronizeAsync(SyncTrigger.LocalChange);
@@ -618,7 +628,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private string GroupKey(TodoItem item)
+    internal static string GroupKey(TodoItem item, DateTime now)
     {
         if (item.Due is null)
         {
@@ -626,17 +636,17 @@ public partial class MainWindow : Window
         }
 
         var date = item.Due.Value.Date;
-        if (date < DateTime.Today)
+        if (IsOverdue(item, now))
         {
             return "逾期";
         }
 
-        if (date == DateTime.Today)
+        if (date == now.Date)
         {
             return "今天";
         }
 
-        if (date == DateTime.Today.AddDays(1))
+        if (date == now.Date.AddDays(1))
         {
             return "明天";
         }
@@ -644,16 +654,18 @@ public partial class MainWindow : Window
         return date.ToString("M月d日 dddd", CultureInfo.GetCultureInfo("zh-CN"));
     }
 
-    private static int GroupOrder(TodoItem item)
+    internal static int GroupOrder(TodoItem item, DateTime now)
     {
         if (item.Due is null)
         {
             return int.MaxValue;
         }
 
-        var offset = (item.Due.Value.Date - DateTime.Today).Days;
-        return offset < 0 ? int.MinValue : offset;
+        return IsOverdue(item, now) ? int.MinValue : (item.Due.Value.Date - now.Date).Days;
     }
+
+    private static bool IsOverdue(TodoItem item, DateTime now) => item.Due is { } due &&
+        (item.HasDueTime ? due < now : due.Date < now.Date);
 
     private static int PriorityOrder(TodoItem item) => item.Priority switch
     {
@@ -703,13 +715,19 @@ public partial class MainWindow : Window
 
     private async void ScheduledSyncTimer_Tick(object? sender, EventArgs e)
     {
+        var now = DateTime.Now;
+        if (_store.Items.Where(_store.IsVisibleInHud)
+            .Any(item => GroupKey(item, _lastTaskRefreshTime) != GroupKey(item, now)))
+        {
+            RefreshTasks();
+        }
         if (!_database.GetAccounts().Any(account => account.Enabled))
         {
             return;
         }
 
         var pluggedIn = Forms.SystemInformation.PowerStatus.PowerLineStatus == Forms.PowerLineStatus.Online;
-        var interval = pluggedIn ? TimeSpan.FromMinutes(1) : TimeSpan.FromMinutes(5);
+        var interval = BackgroundSchedule.SyncInterval(_powerSaving, pluggedIn);
         if (DateTimeOffset.Now - _lastSyncAttempt >= interval)
         {
             await SynchronizeAsync(SyncTrigger.Scheduled);
@@ -748,7 +766,11 @@ public partial class MainWindow : Window
     {
         if (e.Mode == PowerModes.Resume)
         {
-            Dispatcher.InvokeAsync(() => SynchronizeAsync(SyncTrigger.Resume));
+            Dispatcher.InvokeAsync(() =>
+            {
+                RefreshTasks();
+                _ = SynchronizeAsync(SyncTrigger.Resume);
+            });
         }
     }
 
@@ -846,12 +868,24 @@ public partial class MainWindow : Window
             _ = SynchronizeAsync(SyncTrigger.LocalChange);
         };
         settings.HudOpacityChanged += ApplyConfiguredOpacity;
+        settings.PowerSavingChanged += enabled =>
+        {
+            ApplyPowerSaving(enabled);
+            RefreshTasks();
+        };
         settings.ShowDialog();
         _interactionOpen = false;
         if (_isTemporary)
         {
             ResetTemporaryCountdown();
         }
+    }
+
+    private void ApplyPowerSaving(bool enabled)
+    {
+        _powerSaving = enabled;
+        _completionTimer.Interval = BackgroundSchedule.CountdownInterval(enabled);
+        _scheduledSyncTimer.Interval = BackgroundSchedule.RefreshInterval(enabled);
     }
 
     private void OpenConflicts()

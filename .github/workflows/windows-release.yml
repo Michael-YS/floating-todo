@@ -8,17 +8,69 @@ on:
       - "v*"
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing v* tag to build and release as a draft
+        required: true
+        type: string
 
 permissions:
   contents: read
 
+concurrency:
+  group: windows-release-${{ inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: windows-latest
+    outputs:
+      release_tag: ${{ steps.release_tag.outputs.value }}
 
     steps:
+      - name: Resolve release tag
+        id: release_tag
+        shell: pwsh
+        env:
+          INPUT_TAG: ${{ inputs.release_tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if ($env:EVENT_NAME -eq "workflow_dispatch") {
+            $tag = $env:INPUT_TAG
+          } elseif ($env:REF_TYPE -eq "tag") {
+            $tag = $env:REF_NAME
+          } else {
+            $tag = ""
+          }
+
+          if ($env:EVENT_NAME -eq "workflow_dispatch" -and [string]::IsNullOrWhiteSpace($tag)) {
+            throw "workflow_dispatch requires an existing release_tag input."
+          }
+
+          if ($tag -and $tag -notmatch '\Av\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?\z') {
+            throw "Release tag must use vMAJOR.MINOR.PATCH with an optional prerelease suffix."
+          }
+
+          "value=$tag" >> $env:GITHUB_OUTPUT
+
       - name: Check out source
         uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.release_tag.outputs.value && format('refs/tags/{0}', steps.release_tag.outputs.value) || github.ref }}
+
+      - name: Verify selected tag exists
+        if: steps.release_tag.outputs.value != ''
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ steps.release_tag.outputs.value }}
+        run: |
+          $tagRef = "refs/tags/$($env:RELEASE_TAG)"
+          git fetch --force origin "${tagRef}:${tagRef}"
+          if ($LASTEXITCODE -ne 0) { throw "Unable to fetch the selected release tag." }
+          git rev-parse --verify "$tagRef^{commit}" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "The selected tag does not point to a commit." }
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v5
@@ -26,33 +78,42 @@ jobs:
           dotnet-version: "8.0.x"
 
       - name: Restore
-        shell: pwsh
         run: |
           dotnet restore tools/CoreChecks/CoreChecks.csproj
+          if ($LASTEXITCODE -ne 0) { throw "CoreChecks restore failed." }
           dotnet restore FloatingTodo.csproj -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw "Application restore failed." }
+
+      - name: Build application
+        run: dotnet build FloatingTodo.csproj -c Release --no-restore
 
       - name: Run core checks
         run: dotnet run --project tools/CoreChecks/CoreChecks.csproj -c Release --no-restore
 
       - name: Build release packages
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ steps.release_tag.outputs.value }}
         run: |
-          if ($env:GITHUB_REF_TYPE -eq "tag") {
-            ./tools/Publish.ps1 -Version $env:GITHUB_REF_NAME.TrimStart("v") -SkipRestore
+          if ($env:RELEASE_TAG) {
+            $version = $env:RELEASE_TAG.Substring(1)
+            ./tools/Publish.ps1 -Version $version -SkipRestore
+            Copy-Item artifacts/publish/portable/FloatingTodo.exe `
+              "artifacts/releases/FloatingTodo-v$version-win-x64-portable.exe"
           } else {
             ./tools/Publish.ps1 -SkipRestore
           }
 
-      - name: Upload release packages
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: FloatingTodo-${{ github.sha }}
-          path: artifacts/releases/*.zip
+          name: FloatingTodo-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/releases/*
           compression-level: 0
           if-no-files-found: error
 
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
+  draft-release:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: windows-latest
     permissions:
@@ -62,21 +123,34 @@ jobs:
       - name: Download release packages
         uses: actions/download-artifact@v8
         with:
-          name: FloatingTodo-${{ github.sha }}
+          name: FloatingTodo-${{ github.run_id }}-${{ github.run_attempt }}
           path: release-assets
 
-      - name: Create GitHub release
+      - name: Create draft release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
         run: |
-          $assets = Get-ChildItem -LiteralPath release-assets -Filter *.zip |
-            Select-Object -ExpandProperty FullName
-
-          if (gh release view $env:GITHUB_REF_NAME 2>$null) {
-            gh release upload $env:GITHUB_REF_NAME @assets --clobber
-          } else {
-            gh release create $env:GITHUB_REF_NAME @assets `
-              --title $env:GITHUB_REF_NAME `
-              --generate-notes
+          if (-not $env:RELEASE_TAG) {
+            throw "A v* release tag is required."
           }
+
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            throw "Release $env:RELEASE_TAG already exists; refusing to modify or publish it."
+          }
+
+          $assets = Get-ChildItem -LiteralPath release-assets -File |
+            Select-Object -ExpandProperty FullName
+          if ($assets.Count -ne 3) {
+            throw "Expected two ZIP packages and one portable EXE; found $($assets.Count) assets."
+          }
+
+          gh release create $env:RELEASE_TAG @assets `
+            --title $env:RELEASE_TAG `
+            --generate-notes `
+            --draft `
+            --verify-tag
+          if ($LASTEXITCODE -ne 0) { throw "Draft release creation failed." }
